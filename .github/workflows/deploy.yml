@@ -38,13 +38,17 @@ jobs:
             # Pull latest code
             git pull origin main
 
-            # Build and deploy
-            docker compose up --build -d
+            # Build new images WITHOUT stopping running containers
+            docker compose build
 
-            # Wait for bot to start
-            sleep 10
+            # Run migrations while old bot is still running
+            docker compose run --rm migrate
 
-            # Healthcheck: verify all services are running
+            # Swap to new containers (~2s downtime instead of ~30s)
+            docker compose up -d --no-build --remove-orphans
+
+            # Wait and healthcheck
+            sleep 5
             for svc in bot worker scheduler; do
               if ! docker compose ps --format '{{.Name}} {{.Status}}' | grep "$svc" | grep -q "Up"; then
                 echo "FAIL: $svc is not running"

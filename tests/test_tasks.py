@@ -16,9 +16,18 @@ def _bot_mock():
 
 
 class TestSendDoseReminder:
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.Bot")
-    async def test_sends_message(self, mock_bot_cls, mock_session_factory) -> None:
+    async def test_sends_message(
+        self, mock_bot_cls, mock_dt, mock_session_factory
+    ) -> None:
         from bot.tasks import send_dose_reminder
+
+        # Fix time to midday so waking-hours check passes
+        mock_dt.datetime.now.return_value = datetime.datetime(
+            2026, 1, 3, 12, 0, tzinfo=datetime.UTC
+        )
+        mock_dt.datetime.combine = datetime.datetime.combine
 
         bot = _bot_mock()
         mock_bot_cls.return_value = bot
@@ -43,9 +52,17 @@ class TestSendDoseReminder:
         assert args[1].get("reply_markup") is not None
         bot.session.close.assert_called_once()
 
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.Bot")
-    async def test_handles_exception(self, mock_bot_cls, mock_session_factory) -> None:
+    async def test_handles_exception(
+        self, mock_bot_cls, mock_dt, mock_session_factory
+    ) -> None:
         from bot.tasks import send_dose_reminder
+
+        mock_dt.datetime.now.return_value = datetime.datetime(
+            2026, 1, 1, 12, 0, tzinfo=datetime.UTC
+        )
+        mock_dt.datetime.combine = datetime.datetime.combine
 
         bot = _bot_mock()
         bot.send_message = AsyncMock(side_effect=Exception("network error"))

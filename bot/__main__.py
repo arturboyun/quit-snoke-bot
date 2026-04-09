@@ -6,7 +6,6 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
 
 from bot.config import settings
 from bot.handlers import main_router
@@ -32,11 +31,7 @@ async def main() -> None:
     # Start TaskIQ broker (client side — for sending tasks)
     await broker.startup()
 
-    await bot.set_my_commands([
-        BotCommand(command="menu", description="Главное меню"),
-        BotCommand(command="start_course", description="Начать 25-дневный курс"),
-        BotCommand(command="cancel_course", description="Отменить текущий курс"),
-    ])
+    await bot.delete_my_commands()
 
     logger.info("Bot starting...")
     try:

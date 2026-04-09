@@ -18,7 +18,8 @@ class SettingsCallback(CallbackData, prefix="settings"):
 
 
 class MenuCallback(CallbackData, prefix="menu"):
-    action: str  # "take_dose", "progress", "schedule", "settings", "help"
+    action: str  # "take_dose", "progress", "schedule", "settings", "help",
+    #              "start_course", "cancel_course", "back"
 
 
 POPULAR_TIMEZONES = [
@@ -119,34 +120,49 @@ def settings_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💊 Принять таблетку",
-                    callback_data=MenuCallback(action="take_dose").pack(),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📊 Прогресс",
-                    callback_data=MenuCallback(action="progress").pack(),
-                ),
-                InlineKeyboardButton(
-                    text="🕐 Расписание",
-                    callback_data=MenuCallback(action="schedule").pack(),
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="⚙️ Настройки",
-                    callback_data=MenuCallback(action="settings").pack(),
-                ),
-                InlineKeyboardButton(
-                    text="❓ Помощь",
-                    callback_data=MenuCallback(action="help").pack(),
-                ),
-            ],
-        ],
-    )
+def main_menu_keyboard(has_course: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if has_course:
+        rows.append([
+            InlineKeyboardButton(
+                text="💊 Принять таблетку",
+                callback_data=MenuCallback(action="take_dose").pack(),
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton(
+                text="📊 Прогресс",
+                callback_data=MenuCallback(action="progress").pack(),
+            ),
+            InlineKeyboardButton(
+                text="🕐 Расписание",
+                callback_data=MenuCallback(action="schedule").pack(),
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton(
+                text="🛑 Отменить курс",
+                callback_data=MenuCallback(action="cancel_course").pack(),
+            ),
+        ])
+    else:
+        rows.append([
+            InlineKeyboardButton(
+                text="🚀 Начать курс",
+                callback_data=MenuCallback(action="start_course").pack(),
+            ),
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text="⚙️ Настройки",
+            callback_data=MenuCallback(action="settings").pack(),
+        ),
+        InlineKeyboardButton(
+            text="❓ Помощь",
+            callback_data=MenuCallback(action="help").pack(),
+        ),
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)

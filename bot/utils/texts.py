@@ -35,7 +35,7 @@ def ask_sleep_time_text() -> str:
 
 
 def settings_saved_text() -> str:
-    return "✅ Настройки сохранены! Теперь можешь начать курс командой /start_course"
+    return "✅ Настройки сохранены!"
 
 
 def course_started_text(start_date: str) -> str:
@@ -60,7 +60,7 @@ def already_has_course_text() -> str:
 
 
 def no_active_course_text() -> str:
-    return "❌ У тебя нет активного курса. Начни его командой /start_course"
+    return "❌ У тебя нет активного курса. Начни его через меню 👇"
 
 
 def dose_reminder_text(day: int, phase: int, target: int) -> str:
@@ -111,7 +111,7 @@ def course_completed_text() -> str:
 
 
 def course_cancelled_text() -> str:
-    return "🛑 Курс отменён. Ты можешь начать новый командой /start_course"
+    return "🛑 Курс отменён. Ты можешь начать новый через меню 👇"
 
 
 def invalid_time_format_text() -> str:
@@ -119,16 +119,14 @@ def invalid_time_format_text() -> str:
 
 
 def invalid_timezone_text() -> str:
-    return "❌ Неизвестный часовой пояс. Попробуй, например: <b>Europe/Moscow</b>"
+    return "❌ Неизвестный часовой пояс. Попробуй, например: <b>Europe/Kyiv</b>"
 
 
 def help_text() -> str:
     return (
-        "📋 <b>Команды:</b>\n\n"
-        "/menu — Главное меню\n"
-        "/start_course — Начать 25-дневный курс\n"
-        "/cancel_course — Отменить текущий курс\n\n"
-        "Остальное доступно через кнопки меню 👆"
+        "📋 <b>Помощь</b>\n\n"
+        "Все действия доступны через кнопки меню.\n\n"
+        "Если меню пропало — отправь /start"
     )
 
 

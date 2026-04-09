@@ -5,12 +5,13 @@ from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 
 from bot.db.engine import session_factory
 from bot.keyboards.inline import (
     MenuCallback,
+    confirm_cancel_keyboard,
+    confirm_start_keyboard,
     main_menu_keyboard,
     settings_keyboard,
 )
@@ -19,6 +20,7 @@ from bot.services.course import (
     get_doses_taken_today,
     get_or_create_user,
     log_dose,
+    start_course,
 )
 from bot.services.schedule import (
     calculate_dose_times,
@@ -26,11 +28,14 @@ from bot.services.schedule import (
     get_phase,
     get_progress,
 )
+from bot.taskiq_broker import schedule_source
+from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
+    already_has_course_text,
+    course_started_text,
     dose_taken_text,
     help_text,
     menu_text,
-    no_active_course_text,
     progress_text,
     settings_menu_text,
     today_schedule_text,
@@ -39,28 +44,68 @@ from bot.utils.texts import (
 router = Router()
 
 
-async def _safe_edit(callback: CallbackQuery, text: str, **kwargs) -> None:  # noqa: ANN003
+async def _safe_edit(callback: CallbackQuery, text: str, **kwargs) -> None:
     try:
         await callback.message.edit_text(text, parse_mode="HTML", **kwargs)
     except TelegramBadRequest:
         pass
 
 
-@router.message(Command("menu"))
-async def cmd_menu(message: Message) -> None:
-    await message.answer(
-        menu_text(),
-        reply_markup=main_menu_keyboard(),
-        parse_mode="HTML",
-    )
+async def _menu_kb(user_id: int) -> main_menu_keyboard:
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+    return main_menu_keyboard(has_course=course is not None)
 
 
 @router.callback_query(MenuCallback.filter(F.action == "back"))
 async def on_menu_back(callback: CallbackQuery) -> None:
+    kb = await _menu_kb(callback.from_user.id)
+    await _safe_edit(callback, menu_text(), reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(MenuCallback.filter(F.action == "start_course"))
+async def on_menu_start_course(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        active = await get_active_course(session, callback.from_user.id)
+        if active:
+            await _safe_edit(
+                callback,
+                already_has_course_text(),
+                reply_markup=confirm_start_keyboard(),
+            )
+            await callback.answer()
+            return
+
+        user = await get_or_create_user(session, callback.from_user.id)
+        today = datetime.datetime.now(ZoneInfo(user.timezone)).date()
+        await start_course(session, callback.from_user.id, today)
+        await session.commit()
+
     await _safe_edit(
         callback,
-        menu_text(),
-        reply_markup=main_menu_keyboard(),
+        course_started_text(today.isoformat()),
+        reply_markup=main_menu_keyboard(has_course=True),
+    )
+    await callback.answer()
+
+    await schedule_source.startup()
+    await schedule_daily_doses.kiq(callback.from_user.id)
+    await schedule_next_day.kiq(callback.from_user.id)
+
+
+@router.callback_query(MenuCallback.filter(F.action == "cancel_course"))
+async def on_menu_cancel_course(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        active = await get_active_course(session, callback.from_user.id)
+        if not active:
+            await callback.answer("Нет активного курса", show_alert=True)
+            return
+
+    await _safe_edit(
+        callback,
+        "Уверен, что хочешь отменить текущий курс?",
+        reply_markup=confirm_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -107,7 +152,7 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
     await _safe_edit(
         callback,
         dose_taken_text(taken, phase_info.target_tablets),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer("✅ Отмечено!")
 
@@ -135,7 +180,7 @@ async def on_menu_progress(callback: CallbackQuery) -> None:
     await _safe_edit(
         callback,
         progress_text(stats),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer()
 
@@ -170,7 +215,7 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
     await _safe_edit(
         callback,
         today_schedule_text(day, phase_info.phase, times, phase_info.target_tablets),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer()
 
@@ -194,9 +239,6 @@ async def on_menu_settings(callback: CallbackQuery) -> None:
 
 @router.callback_query(MenuCallback.filter(F.action == "help"))
 async def on_menu_help(callback: CallbackQuery) -> None:
-    await _safe_edit(
-        callback,
-        help_text(),
-        reply_markup=main_menu_keyboard(),
-    )
+    kb = await _menu_kb(callback.from_user.id)
+    await _safe_edit(callback, help_text(), reply_markup=kb)
     await callback.answer()

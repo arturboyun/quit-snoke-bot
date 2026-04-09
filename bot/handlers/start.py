@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from bot.db.engine import session_factory
 from bot.keyboards.inline import main_menu_keyboard, timezone_keyboard
 from bot.models.user import User
-from bot.services.course import get_or_create_user, update_user_settings
+from bot.services.course import get_active_course, get_or_create_user, update_user_settings
 from bot.utils.texts import (
     ask_sleep_time_text,
     ask_timezone_text,
@@ -41,9 +41,11 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     if existing:
         await state.clear()
+        async with session_factory() as session:
+            course = await get_active_course(session, message.from_user.id)
         await message.answer(
             welcome_text(),
-            reply_markup=main_menu_keyboard(),
+            reply_markup=main_menu_keyboard(has_course=course is not None),
             parse_mode="HTML",
         )
         return
@@ -128,6 +130,6 @@ async def on_sleep_time(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=False),
         parse_mode="HTML",
     )

@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.db.engine import session_factory
 from bot.keyboards.inline import SettingsCallback, main_menu_keyboard, timezone_keyboard
-from bot.services.course import get_or_create_user, update_user_settings
+from bot.services.course import get_active_course, update_user_settings
 from bot.utils.texts import (
     ask_sleep_time_text,
     ask_timezone_text,
@@ -66,11 +66,12 @@ async def on_settings_timezone(message: Message, state: FSMContext) -> None:
     async with session_factory() as session:
         await update_user_settings(session, message.from_user.id, timezone=tz_name)
         await session.commit()
+        course = await get_active_course(session, message.from_user.id)
 
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=course is not None),
         parse_mode="HTML",
     )
 
@@ -87,11 +88,12 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
     async with session_factory() as session:
         await update_user_settings(session, callback.from_user.id, timezone=tz_name)
         await session.commit()
+        course = await get_active_course(session, callback.from_user.id)
 
     await state.clear()
     await callback.message.edit_text(
         f"🌍 Часовой пояс: <b>{tz_name}</b> ✅",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=course is not None),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -108,11 +110,12 @@ async def on_settings_wake(message: Message, state: FSMContext) -> None:
     async with session_factory() as session:
         await update_user_settings(session, message.from_user.id, wake_time=t)
         await session.commit()
+        course = await get_active_course(session, message.from_user.id)
 
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=course is not None),
         parse_mode="HTML",
     )
 
@@ -128,10 +131,11 @@ async def on_settings_sleep(message: Message, state: FSMContext) -> None:
     async with session_factory() as session:
         await update_user_settings(session, message.from_user.id, sleep_time=t)
         await session.commit()
+        course = await get_active_course(session, message.from_user.id)
 
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(),
+        reply_markup=main_menu_keyboard(has_course=course is not None),
         parse_mode="HTML",
     )

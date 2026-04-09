@@ -1,68 +1,36 @@
-"""Course management: start, cancel, dose confirmation."""
+"""Course management: confirm start/cancel, dose confirmation."""
 
 import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
-from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 
 from bot.db.engine import session_factory
 from bot.keyboards.inline import (
     CourseCallback,
     DoseCallback,
-    confirm_cancel_keyboard,
-    confirm_start_keyboard,
+    main_menu_keyboard,
 )
+from bot.models.course import CourseStatus
 from bot.services.course import (
     get_active_course,
+    get_doses_taken_today,
     get_or_create_user,
     log_dose,
     start_course,
-    get_doses_taken_today,
 )
-from bot.services.schedule import get_course_day, get_phase
-from bot.tasks import schedule_daily_doses, schedule_next_day
+from bot.services.schedule import get_phase
 from bot.taskiq_broker import schedule_source
+from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
-    already_has_course_text,
     course_cancelled_text,
     course_started_text,
     dose_taken_text,
-    no_active_course_text,
+    menu_text,
 )
-from bot.models.course import CourseStatus
 
 router = Router()
-
-
-@router.message(Command("start_course"))
-async def cmd_start_course(message: Message) -> None:
-    async with session_factory() as session:
-        user = await get_or_create_user(session, message.from_user.id)
-        active = await get_active_course(session, message.from_user.id)
-
-        if active:
-            await message.answer(
-                already_has_course_text(),
-                reply_markup=confirm_start_keyboard(),
-                parse_mode="HTML",
-            )
-            return
-
-        today = datetime.datetime.now(ZoneInfo(user.timezone)).date()
-        course = await start_course(session, message.from_user.id, today)
-        await session.commit()
-
-    await message.answer(
-        course_started_text(today.isoformat()),
-        parse_mode="HTML",
-    )
-
-    # Schedule today's doses and the recurring daily scheduler
-    await schedule_source.startup()
-    await schedule_daily_doses.kiq(message.from_user.id)
-    await schedule_next_day.kiq(message.from_user.id)
 
 
 @router.callback_query(CourseCallback.filter(F.action == "confirm_start"))
@@ -70,12 +38,13 @@ async def on_confirm_start(callback: CallbackQuery) -> None:
     async with session_factory() as session:
         user = await get_or_create_user(session, callback.from_user.id)
         today = datetime.datetime.now(ZoneInfo(user.timezone)).date()
-        course = await start_course(session, callback.from_user.id, today)
+        await start_course(session, callback.from_user.id, today)
         await session.commit()
 
     await callback.message.edit_text(
         course_started_text(today.isoformat()),
         parse_mode="HTML",
+        reply_markup=main_menu_keyboard(has_course=True),
     )
 
     await schedule_source.startup()
@@ -86,23 +55,9 @@ async def on_confirm_start(callback: CallbackQuery) -> None:
 
 @router.callback_query(CourseCallback.filter(F.action == "cancel"))
 async def on_cancel_action(callback: CallbackQuery) -> None:
-    await callback.message.delete()
+    kb = main_menu_keyboard(has_course=True)
+    await callback.message.edit_text(menu_text(), parse_mode="HTML", reply_markup=kb)
     await callback.answer()
-
-
-@router.message(Command("cancel_course"))
-async def cmd_cancel_course(message: Message) -> None:
-    async with session_factory() as session:
-        active = await get_active_course(session, message.from_user.id)
-        if not active:
-            await message.answer(no_active_course_text(), parse_mode="HTML")
-            return
-
-    await message.answer(
-        "Уверен, что хочешь отменить текущий курс?",
-        reply_markup=confirm_cancel_keyboard(),
-        parse_mode="HTML",
-    )
 
 
 @router.callback_query(CourseCallback.filter(F.action == "confirm_cancel"))
@@ -113,7 +68,11 @@ async def on_confirm_cancel(callback: CallbackQuery) -> None:
             active.status = CourseStatus.CANCELLED
             await session.commit()
 
-    await callback.message.edit_text(course_cancelled_text(), parse_mode="HTML")
+    await callback.message.edit_text(
+        course_cancelled_text(),
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(has_course=False),
+    )
     await callback.answer()
 
 

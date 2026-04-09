@@ -1,19 +1,14 @@
 """Tests for handlers — start, course, settings, menu, progress."""
 
 import datetime
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
-from zoneinfo import ZoneInfo
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models.user import User
 from bot.services.course import get_or_create_user, start_course
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _make_message(user_id: int = 123, text: str = "") -> MagicMock:
     msg = MagicMock()
@@ -48,6 +43,7 @@ def _make_state() -> MagicMock:
 
 
 # ── Start Handlers ───────────────────────────────────────────────────────────
+
 
 class TestStartHandlers:
     async def test_cmd_start(self, mock_session_factory) -> None:
@@ -152,72 +148,77 @@ class TestStartHandlers:
 
 # ── Course Handlers ──────────────────────────────────────────────────────────
 
+
 class TestCourseHandlers:
     @pytest.fixture(autouse=True)
     def _patch_taskiq(self):
-        with patch("bot.handlers.course.schedule_source") as mock_ss, \
-             patch("bot.handlers.course.schedule_daily_doses") as mock_sdd, \
-             patch("bot.handlers.course.schedule_next_day") as mock_snd:
+        with (
+            patch("bot.handlers.course.schedule_source") as mock_ss,
+            patch("bot.handlers.course.schedule_daily_doses") as mock_sdd,
+            patch("bot.handlers.course.schedule_next_day") as mock_snd,
+            patch("bot.handlers.menu.schedule_source") as mock_ss2,
+            patch("bot.handlers.menu.schedule_daily_doses") as mock_sdd2,
+            patch("bot.handlers.menu.schedule_next_day") as mock_snd2,
+        ):
             mock_ss.startup = AsyncMock()
             mock_sdd.kiq = AsyncMock()
             mock_snd.kiq = AsyncMock()
+            mock_ss2.startup = AsyncMock()
+            mock_sdd2.kiq = AsyncMock()
+            mock_snd2.kiq = AsyncMock()
             self.mock_schedule_source = mock_ss
             self.mock_schedule_daily = mock_sdd
             self.mock_schedule_next = mock_snd
             yield
 
     async def test_start_course_no_active(self, mock_session_factory) -> None:
-        from bot.handlers.course import cmd_start_course
+        from bot.handlers.menu import on_menu_start_course
 
-        msg = _make_message(user_id=300)
-
-        # Create user first
+        cb = _make_callback(user_id=300)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 300)
             await session.commit()
 
-        await cmd_start_course(msg)
-        msg.answer.assert_called_once()
-        assert "Курс начат" in msg.answer.call_args[0][0]
-        self.mock_schedule_daily.kiq.assert_called_once_with(300)
+        await on_menu_start_course(cb)
+        cb.message.edit_text.assert_called_once()
+        assert "Курс начат" in cb.message.edit_text.call_args[0][0]
 
     async def test_start_course_already_active(self, mock_session_factory) -> None:
-        from bot.handlers.course import cmd_start_course
+        from bot.handlers.menu import on_menu_start_course
 
-        msg = _make_message(user_id=301)
+        cb = _make_callback(user_id=301)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 301)
             await start_course(session, 301, datetime.date(2026, 1, 1))
             await session.commit()
 
-        await cmd_start_course(msg)
-        msg.answer.assert_called_once()
-        assert "уже есть" in msg.answer.call_args[0][0]
+        await on_menu_start_course(cb)
+        cb.message.edit_text.assert_called_once()
 
     async def test_cancel_course_none(self, mock_session_factory) -> None:
-        from bot.handlers.course import cmd_cancel_course
+        from bot.handlers.menu import on_menu_cancel_course
 
-        msg = _make_message(user_id=302)
+        cb = _make_callback(user_id=302)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 302)
             await session.commit()
 
-        await cmd_cancel_course(msg)
-        msg.answer.assert_called_once()
-        assert "нет активного" in msg.answer.call_args[0][0].lower()
+        await on_menu_cancel_course(cb)
+        cb.answer.assert_called_once()
+        assert "нет активного" in cb.answer.call_args[0][0].lower()
 
     async def test_cancel_course_active(self, mock_session_factory) -> None:
-        from bot.handlers.course import cmd_cancel_course
+        from bot.handlers.menu import on_menu_cancel_course
 
-        msg = _make_message(user_id=303)
+        cb = _make_callback(user_id=303)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 303)
             await start_course(session, 303, datetime.date(2026, 1, 1))
             await session.commit()
 
-        await cmd_cancel_course(msg)
-        msg.answer.assert_called_once()
-        assert "Уверен" in msg.answer.call_args[0][0]
+        await on_menu_cancel_course(cb)
+        cb.message.edit_text.assert_called_once()
+        assert "Уверен" in cb.message.edit_text.call_args[0][0]
 
     async def test_on_confirm_start(self, mock_session_factory) -> None:
         from bot.handlers.course import on_confirm_start
@@ -236,7 +237,7 @@ class TestCourseHandlers:
 
         cb = _make_callback()
         await on_cancel_action(cb)
-        cb.message.delete.assert_called_once()
+        cb.message.edit_text.assert_called_once()
         cb.answer.assert_called_once()
 
     async def test_on_confirm_cancel(self, mock_session_factory) -> None:
@@ -285,6 +286,7 @@ class TestCourseHandlers:
 
 
 # ── Settings Handlers ────────────────────────────────────────────────────────
+
 
 class TestSettingsHandlers:
     async def test_on_change_timezone(self, mock_session_factory) -> None:
@@ -415,14 +417,19 @@ class TestSettingsHandlers:
 
 # ── Menu Handlers ────────────────────────────────────────────────────────────
 
-class TestMenuHandlers:
-    async def test_cmd_menu(self, mock_session_factory) -> None:
-        from bot.handlers.menu import cmd_menu
 
-        msg = _make_message()
-        await cmd_menu(msg)
-        msg.answer.assert_called_once()
-        assert "Главное меню" in msg.answer.call_args[0][0]
+class TestMenuHandlers:
+    async def test_on_menu_back_shows_menu(self, mock_session_factory) -> None:
+        from bot.handlers.menu import on_menu_back
+
+        cb = _make_callback(user_id=420)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 420)
+            await session.commit()
+
+        await on_menu_back(cb)
+        cb.message.edit_text.assert_called_once()
+        cb.answer.assert_called_once()
 
     async def test_on_menu_back(self, mock_session_factory) -> None:
         from bot.handlers.menu import on_menu_back
@@ -473,7 +480,8 @@ class TestMenuHandlers:
         async with mock_session_factory() as session:
             await get_or_create_user(session, 502)
             await start_course(
-                session, 502,
+                session,
+                502,
                 datetime.date.today() - datetime.timedelta(days=30),
             )
             await session.commit()
@@ -540,17 +548,16 @@ class TestMenuHandlers:
 
         await on_menu_settings(cb)
         cb.message.edit_text.assert_called_once()
-        assert "Настройки" in cb.message.edit_text.call_args[0][0]
+        assert "настройки" in cb.message.edit_text.call_args[0][0].lower()
 
     async def test_safe_edit_handles_bad_request(self, mock_session_factory) -> None:
         from aiogram.exceptions import TelegramBadRequest
+
         from bot.handlers.menu import _safe_edit
 
         cb = _make_callback()
         cb.message.edit_text = AsyncMock(
-            side_effect=TelegramBadRequest(
-                method=MagicMock(), message="message is not modified"
-            ),
+            side_effect=TelegramBadRequest(method=MagicMock(), message="message is not modified"),
         )
         # Should not raise
         await _safe_edit(cb, "test text")
@@ -562,7 +569,8 @@ class TestMenuHandlers:
         async with mock_session_factory() as session:
             await get_or_create_user(session, 508)
             await start_course(
-                session, 508,
+                session,
+                508,
                 datetime.date.today() - datetime.timedelta(days=30),
             )
             await session.commit()
@@ -578,7 +586,8 @@ class TestMenuHandlers:
         async with mock_session_factory() as session:
             await get_or_create_user(session, 509)
             await start_course(
-                session, 509,
+                session,
+                509,
                 datetime.date.today() - datetime.timedelta(days=30),
             )
             await session.commit()

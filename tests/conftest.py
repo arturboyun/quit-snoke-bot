@@ -1,7 +1,7 @@
 import datetime
 import os
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -53,7 +53,7 @@ async def db_session(db_engine):
 
 @pytest_asyncio.fixture
 async def mock_session_factory(db_engine):
-    """Patch bot.db.engine.session_factory to use in-memory SQLite."""
+    """Patch session_factory in all modules that import it."""
     factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
     @asynccontextmanager
@@ -61,5 +61,19 @@ async def mock_session_factory(db_engine):
         async with factory() as session:
             yield session
 
-    with patch("bot.db.engine.session_factory", _factory):
+    targets = [
+        "bot.db.engine.session_factory",
+        "bot.handlers.start.session_factory",
+        "bot.handlers.course.session_factory",
+        "bot.handlers.settings.session_factory",
+        "bot.handlers.menu.session_factory",
+        "bot.tasks.session_factory",
+    ]
+    patches = [patch(t, _factory) for t in targets]
+    for p in patches:
+        p.start()
+    try:
         yield _factory
+    finally:
+        for p in patches:
+            p.stop()

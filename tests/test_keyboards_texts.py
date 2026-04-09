@@ -1,17 +1,14 @@
 """Tests for keyboards, text templates, and throttle middleware."""
 
-import datetime
-import time
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from aiogram.types import Update
 
 from bot.keyboards.inline import (
+    POPULAR_TIMEZONES,
     CourseCallback,
     DoseCallback,
     MenuCallback,
-    POPULAR_TIMEZONES,
     SettingsCallback,
     confirm_cancel_keyboard,
     confirm_start_keyboard,
@@ -164,8 +161,7 @@ class TestTexts:
 
     def test_help_text_lists_commands(self) -> None:
         text = help_text()
-        for cmd in ["/menu", "/start_course", "/cancel_course"]:
-            assert cmd in text
+        assert "/start" in text
 
     def test_all_text_functions_return_strings(self) -> None:
         """Ensure all text functions produce non-empty strings."""
@@ -269,8 +265,8 @@ class TestThrottleMiddleware:
 
 class TestMenuKeyboard:
     def test_main_menu_keyboard_structure(self) -> None:
-        kb = main_menu_keyboard()
-        assert len(kb.inline_keyboard) == 3
+        kb = main_menu_keyboard(has_course=True)
+        assert len(kb.inline_keyboard) == 4
         all_texts = [b.text for row in kb.inline_keyboard for b in row]
         assert any("таблетку" in t.lower() for t in all_texts)
         assert any("Прогресс" in t for t in all_texts)

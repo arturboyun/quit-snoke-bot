@@ -1,16 +1,9 @@
 """Tests for TaskIQ tasks — dose reminders, daily scheduling, progress summary."""
 
 import datetime
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
-from zoneinfo import ZoneInfo
 
-import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from bot.models.course import CourseStatus
-from bot.services.course import get_or_create_user, start_course, get_active_course
+from bot.services.course import get_active_course, get_or_create_user, start_course
 
 
 def _bot_mock():
@@ -55,7 +48,10 @@ class TestScheduleDailyDoses:
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_no_course_returns_early(
-        self, mock_bot_cls, mock_send, mock_session_factory,
+        self,
+        mock_bot_cls,
+        mock_send,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
@@ -70,7 +66,11 @@ class TestScheduleDailyDoses:
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_schedules_future_doses(
-        self, mock_bot_cls, mock_send, mock_sched_src, mock_session_factory,
+        self,
+        mock_bot_cls,
+        mock_send,
+        mock_sched_src,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
@@ -87,7 +87,9 @@ class TestScheduleDailyDoses:
 
     @patch("bot.tasks.Bot")
     async def test_course_over_25_completes(
-        self, mock_bot_cls, mock_session_factory,
+        self,
+        mock_bot_cls,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
@@ -98,7 +100,8 @@ class TestScheduleDailyDoses:
             await get_or_create_user(session, 602)
             # Course started 26 days ago — day > 25
             await start_course(
-                session, 602,
+                session,
+                602,
                 datetime.date.today() - datetime.timedelta(days=26),
             )
             await session.commit()
@@ -117,7 +120,9 @@ class TestScheduleDailyDoses:
 
     @patch("bot.tasks.Bot")
     async def test_day_before_start_returns_early(
-        self, mock_bot_cls, mock_session_factory,
+        self,
+        mock_bot_cls,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
@@ -125,7 +130,8 @@ class TestScheduleDailyDoses:
             await get_or_create_user(session, 603)
             # Course starts tomorrow — day < 1
             await start_course(
-                session, 603,
+                session,
+                603,
                 datetime.date.today() + datetime.timedelta(days=1),
             )
             await session.commit()
@@ -137,7 +143,11 @@ class TestScheduleDailyDoses:
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_quit_day_sends_message(
-        self, mock_bot_cls, mock_send, mock_sched_src, mock_session_factory,
+        self,
+        mock_bot_cls,
+        mock_send,
+        mock_sched_src,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
@@ -149,7 +159,8 @@ class TestScheduleDailyDoses:
             await get_or_create_user(session, 604)
             # Day 5 is quit day
             await start_course(
-                session, 604,
+                session,
+                604,
                 datetime.date.today() - datetime.timedelta(days=4),
             )
             await session.commit()
@@ -165,7 +176,10 @@ class TestScheduleNextDay:
     @patch("bot.tasks.schedule_daily_doses")
     @patch("bot.tasks.schedule_source")
     async def test_no_course_returns_early(
-        self, mock_source, mock_daily, mock_session_factory,
+        self,
+        mock_source,
+        mock_daily,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_next_day
 
@@ -176,30 +190,34 @@ class TestScheduleNextDay:
         await schedule_next_day(user_id=700)
         mock_daily.schedule_by_time.assert_not_called()
 
-    @patch("bot.tasks.schedule_next_day")
     @patch("bot.tasks.schedule_daily_doses")
     @patch("bot.tasks.schedule_source")
     async def test_schedules_next_day(
-        self, mock_source, mock_daily, mock_self, mock_session_factory,
+        self,
+        mock_source,
+        mock_daily,
+        mock_session_factory,
     ) -> None:
-        # Import the actual function under a different name to avoid mock override
         from bot.tasks import schedule_next_day as _schedule_next_day
 
         mock_daily.schedule_by_time = AsyncMock()
-        mock_self.schedule_by_time = AsyncMock()
+        # schedule_next_day also calls schedule_next_day.schedule_by_time
+        with patch.object(_schedule_next_day, "schedule_by_time", new=AsyncMock()):
+            async with mock_session_factory() as session:
+                await get_or_create_user(session, 701)
+                await start_course(session, 701, datetime.date.today())
+                await session.commit()
 
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 701)
-            await start_course(session, 701, datetime.date.today())
-            await session.commit()
-
-        await _schedule_next_day(user_id=701)
-        mock_daily.schedule_by_time.assert_called_once()
+            await _schedule_next_day(user_id=701)
+            mock_daily.schedule_by_time.assert_called_once()
 
     @patch("bot.tasks.schedule_daily_doses")
     @patch("bot.tasks.schedule_source")
     async def test_day_over_25_returns_early(
-        self, mock_source, mock_daily, mock_session_factory,
+        self,
+        mock_source,
+        mock_daily,
+        mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_next_day
 
@@ -209,7 +227,8 @@ class TestScheduleNextDay:
             await get_or_create_user(session, 702)
             # Tomorrow would be day 27
             await start_course(
-                session, 702,
+                session,
+                702,
                 datetime.date.today() - datetime.timedelta(days=25),
             )
             await session.commit()
@@ -257,7 +276,8 @@ class TestSendProgressSummary:
         async with mock_session_factory() as session:
             await get_or_create_user(session, 802)
             await start_course(
-                session, 802,
+                session,
+                802,
                 datetime.date.today() - datetime.timedelta(days=30),
             )
             await session.commit()

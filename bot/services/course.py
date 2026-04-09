@@ -175,11 +175,7 @@ async def get_course_history(
     user_id: int,
 ) -> list[Course]:
     """Return all courses for a user, newest first."""
-    stmt = (
-        select(Course)
-        .where(Course.user_id == user_id)
-        .order_by(Course.created_at.desc())
-    )
+    stmt = select(Course).where(Course.user_id == user_id).order_by(Course.created_at.desc())
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
@@ -294,6 +290,22 @@ async def get_relapse_stats(session: AsyncSession, user_id: int) -> dict:
     entries = result.scalars().all()
     total_cigarettes = sum(e.cigarettes for e in entries)
     return {"count": len(entries), "total_cigarettes": total_cigarettes}
+
+
+async def get_last_relapse_time(
+    session: AsyncSession,
+    user_id: int,
+) -> datetime.datetime | None:
+    """Return the created_at of the most recent relapse, or None if clean."""
+    stmt = (
+        select(RelapseLog)
+        .where(RelapseLog.user_id == user_id)
+        .order_by(RelapseLog.created_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    entry = result.scalar_one_or_none()
+    return entry.created_at if entry else None
 
 
 # ── Achievements ─────────────────────────────────────────────────────────────

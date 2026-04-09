@@ -89,6 +89,9 @@ async def on_timezone_button(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.message(OnboardingStates.waiting_timezone)
 async def on_timezone_text(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_timezone_text(), parse_mode="HTML")
+        return
     tz_name = message.text.strip()
     try:
         ZoneInfo(tz_name)
@@ -103,6 +106,9 @@ async def on_timezone_text(message: Message, state: FSMContext) -> None:
 
 @router.message(OnboardingStates.waiting_wake_time)
 async def on_wake_time(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_time_format_text(), parse_mode="HTML")
+        return
     try:
         t = datetime.datetime.strptime(message.text.strip(), "%H:%M").time()
     except ValueError:
@@ -116,6 +122,9 @@ async def on_wake_time(message: Message, state: FSMContext) -> None:
 
 @router.message(OnboardingStates.waiting_sleep_time)
 async def on_sleep_time(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_time_format_text(), parse_mode="HTML")
+        return
     try:
         t = datetime.datetime.strptime(message.text.strip(), "%H:%M").time()
     except ValueError:

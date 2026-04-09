@@ -441,3 +441,12 @@ def course_history_text(courses: list) -> str:
 
 def dose_too_soon_text(minutes_left: int) -> str:
     return f"⏳ Слишком рано для следующей таблетки.\nПодожди ещё {minutes_left} мин."
+
+
+def dose_followup_text(day: int, phase: int, target: int | str) -> str:
+    return (
+        f"⏰ Напоминание: ты ещё не отметил приём таблетки!\n\n"
+        f"📅 День {day}/25 (фаза {phase})\n"
+        f"📊 Цель на сегодня: {target} таблеток\n\n"
+        "Если ты уже принял — нажми кнопку ниже 👇"
+    )

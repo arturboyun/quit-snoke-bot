@@ -83,12 +83,14 @@ class TestSendDoseReminder:
 
 
 class TestScheduleDailyDoses:
+    @patch("bot.tasks.send_dose_followup")
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_no_course_returns_early(
         self,
         mock_bot_cls,
         mock_send,
+        mock_followup,
         mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
@@ -101,18 +103,21 @@ class TestScheduleDailyDoses:
         mock_send.schedule_by_time.assert_not_called()
 
     @patch("bot.tasks.schedule_source")
+    @patch("bot.tasks.send_dose_followup")
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_schedules_future_doses(
         self,
         mock_bot_cls,
         mock_send,
+        mock_followup,
         mock_sched_src,
         mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
 
         mock_send.schedule_by_time = AsyncMock()
+        mock_followup.schedule_by_time = AsyncMock()
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 601)
@@ -178,12 +183,14 @@ class TestScheduleDailyDoses:
         # No bot messages, no errors
 
     @patch("bot.tasks.schedule_source")
+    @patch("bot.tasks.send_dose_followup")
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
     async def test_quit_day_sends_message(
         self,
         mock_bot_cls,
         mock_send,
+        mock_followup,
         mock_sched_src,
         mock_session_factory,
     ) -> None:
@@ -192,6 +199,7 @@ class TestScheduleDailyDoses:
         bot = _bot_mock()
         mock_bot_cls.return_value = bot
         mock_send.schedule_by_time = AsyncMock()
+        mock_followup.schedule_by_time = AsyncMock()
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 604)

@@ -27,6 +27,7 @@ from bot.services.schedule import (
 from bot.taskiq_broker import broker, schedule_source
 from bot.utils.texts import (
     course_completed_text,
+    dose_followup_text,
     dose_reminder_text,
     missed_doses_text,
     morning_checkin_text,
@@ -34,6 +35,9 @@ from bot.utils.texts import (
     progress_text,
     quit_day_text,
 )
+
+# Minutes to wait after a dose reminder before sending a follow-up nudge
+FOLLOWUP_DELAY_MINUTES = 15
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,39 @@ async def send_dose_reminder(user_id: int, course_id: int, day: int, phase: int)
         await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
     except Exception:
         logger.exception("Failed to send dose reminder to user %d", user_id)
+    finally:
+        await bot.session.close()
+
+
+@broker.task
+async def send_dose_followup(
+    user_id: int, course_id: int, day: int, phase: int, dose_number: int
+) -> None:
+    """Follow-up nudge sent if the user hasn't confirmed a dose."""
+    bot = Bot(token=settings.token)
+    try:
+        async with session_factory() as session:
+            course = await get_active_course(session, user_id)
+            if not course or course.id != course_id:
+                return
+
+            from bot.services.course import get_doses_taken_today
+
+            user = await get_or_create_user(session, user_id)
+            tz = ZoneInfo(user.timezone)
+            today = datetime.datetime.now(tz).date()
+            taken = await get_doses_taken_today(session, course_id, today)
+
+            # User already confirmed this dose (or later ones) — no nudge needed
+            if taken >= dose_number:
+                return
+
+        phase_info = get_phase(day)
+        text = dose_followup_text(day, phase, phase_info.target_display)
+        kb = dose_taken_keyboard(course_id=course_id, day=day, phase=phase)
+        await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        logger.exception("Failed to send dose follow-up to user %d", user_id)
     finally:
         await bot.session.close()
 
@@ -111,24 +148,27 @@ async def schedule_daily_doses(user_id: int) -> None:
         if day < 1:
             return
 
-        # Log missed doses from previous day
+        # Log missed doses for all unlogged days (handles multi-day gaps)
         if day > 1:
-            prev_day = day - 1
-            prev_phase = get_phase(prev_day)
-            missed = await log_missed_doses(
-                session,
-                course.id,
-                user_id,
-                day=prev_day,
-                phase=prev_phase.phase,
-                total_expected=prev_phase.min_tablets,  # Phase 5: 1 (not 2)
-            )
-            if missed > 0:
+            total_missed = 0
+            first_gap_day = max(1, day - 7)  # look back at most 7 days
+            for gap_day in range(first_gap_day, day):
+                gap_phase = get_phase(gap_day)
+                missed = await log_missed_doses(
+                    session,
+                    course.id,
+                    user_id,
+                    day=gap_day,
+                    phase=gap_phase.phase,
+                    total_expected=gap_phase.min_tablets,  # Phase 5: 1 (not 2)
+                )
+                total_missed += missed
+            if total_missed > 0:
                 bot = Bot(token=settings.token)
                 try:
                     await bot.send_message(
                         user_id,
-                        missed_doses_text(missed, prev_day),
+                        missed_doses_text(total_missed, day - 1),
                         parse_mode="HTML",
                     )
                 finally:
@@ -183,9 +223,11 @@ async def schedule_daily_doses(user_id: int) -> None:
                 user_id,
             )
 
-        for slot in slots:
+        for dose_index, slot in enumerate(slots):
             if slot.time <= now:
                 continue
+            # dose_number = 1-indexed position in today's full schedule
+            dose_number = dose_index + 1
             await send_dose_reminder.schedule_by_time(
                 schedule_source,
                 slot.time,
@@ -193,6 +235,19 @@ async def schedule_daily_doses(user_id: int) -> None:
                 course.id,
                 slot.day,
                 slot.phase,
+            )
+            # Schedule a follow-up nudge if dose is not confirmed
+            followup_time = slot.time + datetime.timedelta(
+                minutes=FOLLOWUP_DELAY_MINUTES,
+            )
+            await send_dose_followup.schedule_by_time(
+                schedule_source,
+                followup_time,
+                user_id,
+                course.id,
+                slot.day,
+                slot.phase,
+                dose_number,
             )
 
         # Schedule progress summary near end of day (15 min before sleep)
@@ -232,10 +287,10 @@ async def schedule_next_day(user_id: int) -> None:
         tomorrow = datetime.datetime.now(tz).date() + datetime.timedelta(days=1)
         day = get_course_day(course.start_date, tomorrow)
 
-        if day > 25:
+        if day > 26:
             return
 
-        # Schedule daily dose calculation 1 minute after wake time tomorrow
+        # Schedule daily dose calculation 1 minute before wake time tomorrow
         wake_dt = datetime.datetime.combine(
             tomorrow,
             user.wake_time,

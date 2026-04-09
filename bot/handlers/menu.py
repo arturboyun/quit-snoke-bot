@@ -26,6 +26,7 @@ from bot.services.course import (
     get_craving_count,
     get_doses_taken_today,
     get_last_dose_time,
+    get_last_relapse_time,
     get_mood_history,
     get_or_create_user,
     get_relapse_stats,
@@ -160,6 +161,21 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
             await callback.answer("Курс завершён", show_alert=True)
             return
 
+        # Waking hours check
+        now_time = now.time()
+        if user.sleep_time > user.wake_time:
+            if now_time < user.wake_time or now_time >= user.sleep_time:
+                await callback.answer(
+                    "Сейчас время сна — таблетку принимать не нужно", show_alert=True
+                )
+                return
+        else:
+            if user.sleep_time <= now_time < user.wake_time:
+                await callback.answer(
+                    "Сейчас время сна — таблетку принимать не нужно", show_alert=True
+                )
+                return
+
         phase_info = get_phase(day)
 
         taken = await get_doses_taken_today(session, course.id, today)
@@ -233,9 +249,16 @@ async def on_menu_progress(callback: CallbackQuery) -> None:
 
         taken = await get_doses_taken_today(session, course.id, today)
 
+        # Only show smoke-free days if no relapses recorded
+        smoke_free_days = None
+        if day >= QUIT_DAY:
+            relapse_stats = await get_relapse_stats(session, callback.from_user.id)
+            if relapse_stats["total_cigarettes"] == 0:
+                smoke_free_days = max(0, day - QUIT_DAY)
+
     stats = get_progress(day, taken)
-    if day >= QUIT_DAY:
-        stats["smoke_free_days"] = max(0, day - QUIT_DAY)
+    if smoke_free_days is not None:
+        stats["smoke_free_days"] = smoke_free_days
     await _safe_edit(
         callback,
         progress_text(stats),
@@ -318,7 +341,13 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
         tz = ZoneInfo(user.timezone)
         today = datetime.datetime.now(tz).date()
         day = get_course_day(course.start_date, today)
-        days_smoke_free = max(0, day - QUIT_DAY) if day >= QUIT_DAY else 0
+
+        # Only show smoke-free days if no relapses
+        relapse_stats = await get_relapse_stats(session, callback.from_user.id)
+        if relapse_stats["total_cigarettes"] == 0 and day >= QUIT_DAY:
+            days_smoke_free = max(0, day - QUIT_DAY)
+        else:
+            days_smoke_free = 0
 
         await log_craving(session, callback.from_user.id)
         cravings = await get_craving_count(session, callback.from_user.id)
@@ -371,6 +400,7 @@ async def on_menu_savings(callback: CallbackQuery) -> None:
 
         user = await get_or_create_user(session, callback.from_user.id)
         profile = await get_smoking_profile(session, callback.from_user.id)
+        relapse_stats = await get_relapse_stats(session, callback.from_user.id)
 
     if not profile:
         await _safe_edit(
@@ -384,9 +414,15 @@ async def on_menu_savings(callback: CallbackQuery) -> None:
     tz = ZoneInfo(user.timezone)
     today = datetime.datetime.now(tz).date()
     day = get_course_day(course.start_date, today)
-    days_smoke_free = max(0, day - QUIT_DAY) if day >= QUIT_DAY else 0
+
+    if relapse_stats["total_cigarettes"] == 0 and day >= QUIT_DAY:
+        days_smoke_free = max(0, day - QUIT_DAY)
+    else:
+        days_smoke_free = 0
 
     cigarettes_avoided = days_smoke_free * profile.cigarettes_per_day
+    # Subtract cigarettes actually smoked during relapses
+    cigarettes_avoided = max(0, cigarettes_avoided - relapse_stats["total_cigarettes"])
     price_per_cigarette = profile.pack_price / profile.cigarettes_in_pack
     money_saved = cigarettes_avoided * price_per_cigarette
     examples = _money_examples(money_saved)
@@ -411,6 +447,7 @@ async def on_menu_health(callback: CallbackQuery) -> None:
             return
 
         user = await get_or_create_user(session, callback.from_user.id)
+        last_relapse = await get_last_relapse_time(session, callback.from_user.id)
 
     tz = ZoneInfo(user.timezone)
     now = datetime.datetime.now(tz)
@@ -421,7 +458,16 @@ async def on_menu_health(callback: CallbackQuery) -> None:
     else:
         quit_date = course.start_date + datetime.timedelta(days=QUIT_DAY - 1)
         quit_dt = datetime.datetime.combine(quit_date, datetime.time(0, 0), tzinfo=tz)
-        hours_smoke_free = (now - quit_dt).total_seconds() / 3600
+        # If user relapsed, health recovery resets from last relapse
+        if last_relapse is not None:
+            last_relapse_aware = (
+                last_relapse if last_relapse.tzinfo
+                else last_relapse.replace(tzinfo=datetime.UTC)
+            )
+            smoke_free_since = max(quit_dt, last_relapse_aware.astimezone(tz))
+        else:
+            smoke_free_since = quit_dt
+        hours_smoke_free = max(0.0, (now - smoke_free_since).total_seconds() / 3600)
 
     await _safe_edit(
         callback,
@@ -477,11 +523,14 @@ async def on_menu_relapse(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(RelapseStates.waiting_cigarette_count)
 async def on_relapse_count(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("❌ Отправь число от 1 до 100.")
+        return
     try:
         count = int(message.text.strip())
         if count < 1 or count > 100:
             raise ValueError
-    except (ValueError, AttributeError):
+    except ValueError:
         await message.answer("❌ Отправь число от 1 до 100.")
         return
 

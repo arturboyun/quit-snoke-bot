@@ -16,7 +16,7 @@ from bot.services.course import (
     update_user_settings,
 )
 from bot.taskiq_broker import schedule_source
-from bot.tasks import schedule_daily_doses
+from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
     ask_cigarettes_per_day_text,
     ask_pack_price_text,
@@ -67,6 +67,9 @@ async def on_change_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(SettingsStates.waiting_timezone)
 async def on_settings_timezone(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_timezone_text(), parse_mode="HTML")
+        return
     tz_name = message.text.strip()
     try:
         ZoneInfo(tz_name)
@@ -83,6 +86,7 @@ async def on_settings_timezone(message: Message, state: FSMContext) -> None:
     if has_course:
         await schedule_source.startup()
         await schedule_daily_doses.kiq(message.from_user.id)
+        await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
     await message.answer(
@@ -110,6 +114,7 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
     if has_course:
         await schedule_source.startup()
         await schedule_daily_doses.kiq(callback.from_user.id)
+        await schedule_next_day.kiq(callback.from_user.id)
 
     await state.clear()
     await callback.message.edit_text(
@@ -122,6 +127,9 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
 
 @router.message(SettingsStates.waiting_wake_time)
 async def on_settings_wake(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_time_format_text(), parse_mode="HTML")
+        return
     try:
         t = datetime.datetime.strptime(message.text.strip(), "%H:%M").time()
     except ValueError:
@@ -137,6 +145,7 @@ async def on_settings_wake(message: Message, state: FSMContext) -> None:
     if has_course:
         await schedule_source.startup()
         await schedule_daily_doses.kiq(message.from_user.id)
+        await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
     await message.answer(
@@ -148,6 +157,9 @@ async def on_settings_wake(message: Message, state: FSMContext) -> None:
 
 @router.message(SettingsStates.waiting_sleep_time)
 async def on_settings_sleep(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer(invalid_time_format_text(), parse_mode="HTML")
+        return
     try:
         t = datetime.datetime.strptime(message.text.strip(), "%H:%M").time()
     except ValueError:
@@ -163,6 +175,7 @@ async def on_settings_sleep(message: Message, state: FSMContext) -> None:
     if has_course:
         await schedule_source.startup()
         await schedule_daily_doses.kiq(message.from_user.id)
+        await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
     await message.answer(

@@ -102,6 +102,7 @@ class TestScheduleDailyDoses:
         await schedule_daily_doses(user_id=600)
         mock_send.schedule_by_time.assert_not_called()
 
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.schedule_source")
     @patch("bot.tasks.send_progress_summary")
     @patch("bot.tasks.send_morning_checkin")
@@ -116,9 +117,16 @@ class TestScheduleDailyDoses:
         mock_checkin,
         mock_summary,
         mock_sched_src,
+        mock_dt,
         mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
+
+        # Fix time to midday so day calculation is stable across timezones
+        fixed_now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.UTC)
+        mock_dt.datetime.now.return_value = fixed_now
+        mock_dt.datetime.combine = datetime.datetime.combine
+        mock_dt.timedelta = datetime.timedelta
 
         mock_send.schedule_by_time = AsyncMock()
         mock_followup.schedule_by_time = AsyncMock()
@@ -127,11 +135,11 @@ class TestScheduleDailyDoses:
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 601)
-            await start_course(session, 601, datetime.date.today())
+            await start_course(session, 601, datetime.date(2026, 1, 1))
             await session.commit()
 
         await schedule_daily_doses(user_id=601)
-        # Should have scheduled some future doses (depends on current time)
+        # Should have scheduled some future doses
         # At minimum, no errors during execution
 
     @patch("bot.tasks.Bot")
@@ -167,13 +175,21 @@ class TestScheduleDailyDoses:
             course = await get_active_course(session, 602)
             assert course is None  # no longer active
 
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.Bot")
     async def test_day_before_start_returns_early(
         self,
         mock_bot_cls,
+        mock_dt,
         mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
+
+        # Fix time so day calculation is stable across timezones
+        fixed_now = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.UTC)
+        mock_dt.datetime.now.return_value = fixed_now
+        mock_dt.datetime.combine = datetime.datetime.combine
+        mock_dt.timedelta = datetime.timedelta
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 603)
@@ -181,13 +197,14 @@ class TestScheduleDailyDoses:
             await start_course(
                 session,
                 603,
-                datetime.date.today() + datetime.timedelta(days=1),
+                datetime.date(2026, 1, 2),
             )
             await session.commit()
 
         await schedule_daily_doses(user_id=603)
         # No bot messages, no errors
 
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.schedule_source")
     @patch("bot.tasks.send_progress_summary")
     @patch("bot.tasks.send_morning_checkin")
@@ -202,9 +219,16 @@ class TestScheduleDailyDoses:
         mock_checkin,
         mock_summary,
         mock_sched_src,
+        mock_dt,
         mock_session_factory,
     ) -> None:
         from bot.tasks import schedule_daily_doses
+
+        # Fix time to midday on Jan 5 so day=5 (quit day)
+        fixed_now = datetime.datetime(2026, 1, 5, 12, 0, tzinfo=datetime.UTC)
+        mock_dt.datetime.now.return_value = fixed_now
+        mock_dt.datetime.combine = datetime.datetime.combine
+        mock_dt.timedelta = datetime.timedelta
 
         bot = _bot_mock()
         mock_bot_cls.return_value = bot
@@ -215,11 +239,11 @@ class TestScheduleDailyDoses:
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 604)
-            # Day 5 is quit day
+            # Day 5 is quit day: start_date=Jan 1, today=Jan 5
             await start_course(
                 session,
                 604,
-                datetime.date.today() - datetime.timedelta(days=4),
+                datetime.date(2026, 1, 1),
             )
             await session.commit()
 

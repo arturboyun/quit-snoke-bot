@@ -11,7 +11,10 @@ class SmokingProfile(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id"), nullable=False, unique=True,
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=False,
+        unique=True,
     )
     cigarettes_per_day: Mapped[int] = mapped_column(Integer, nullable=False)
     pack_price: Mapped[float] = mapped_column(Float, nullable=False)

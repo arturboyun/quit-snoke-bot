@@ -19,6 +19,9 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+      - name: Lint
+        run: uv run ruff check .
+
   deploy:
     needs: test
     runs-on: ubuntu-latest
@@ -53,3 +56,19 @@ jobs:
 
             # Cleanup old images
             docker image prune -f
+
+      - name: Notify Telegram (success)
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
+            -d chat_id=${{ secrets.ADMIN_CHAT_ID }} \
+            -d parse_mode=HTML \
+            -d text="✅ <b>Deploy successful</b>%0A<code>${GITHUB_SHA::7}</code> — ${GITHUB_ACTOR}"
+
+      - name: Notify Telegram (failure)
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
+            -d chat_id=${{ secrets.ADMIN_CHAT_ID }} \
+            -d parse_mode=HTML \
+            -d text="❌ <b>Deploy failed</b>%0A<code>${GITHUB_SHA::7}</code> — ${GITHUB_ACTOR}%0A<a href='https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}'>Logs</a>"

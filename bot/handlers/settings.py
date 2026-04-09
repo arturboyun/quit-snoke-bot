@@ -15,6 +15,8 @@ from bot.services.course import (
     save_smoking_profile,
     update_user_settings,
 )
+from bot.taskiq_broker import schedule_source
+from bot.tasks import schedule_daily_doses
 from bot.utils.texts import (
     ask_cigarettes_per_day_text,
     ask_pack_price_text,
@@ -77,10 +79,15 @@ async def on_settings_timezone(message: Message, state: FSMContext) -> None:
         await session.commit()
         course = await get_active_course(session, message.from_user.id)
 
+    has_course = course is not None
+    if has_course:
+        await schedule_source.startup()
+        await schedule_daily_doses.kiq(message.from_user.id)
+
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=course is not None),
+        reply_markup=main_menu_keyboard(has_course=has_course),
         parse_mode="HTML",
     )
 
@@ -99,10 +106,15 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
         await session.commit()
         course = await get_active_course(session, callback.from_user.id)
 
+    has_course = course is not None
+    if has_course:
+        await schedule_source.startup()
+        await schedule_daily_doses.kiq(callback.from_user.id)
+
     await state.clear()
     await callback.message.edit_text(
         f"🌍 Часовой пояс: <b>{tz_name}</b> ✅",
-        reply_markup=main_menu_keyboard(has_course=course is not None),
+        reply_markup=main_menu_keyboard(has_course=has_course),
         parse_mode="HTML",
     )
     await callback.answer()
@@ -121,10 +133,15 @@ async def on_settings_wake(message: Message, state: FSMContext) -> None:
         await session.commit()
         course = await get_active_course(session, message.from_user.id)
 
+    has_course = course is not None
+    if has_course:
+        await schedule_source.startup()
+        await schedule_daily_doses.kiq(message.from_user.id)
+
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=course is not None),
+        reply_markup=main_menu_keyboard(has_course=has_course),
         parse_mode="HTML",
     )
 
@@ -142,10 +159,15 @@ async def on_settings_sleep(message: Message, state: FSMContext) -> None:
         await session.commit()
         course = await get_active_course(session, message.from_user.id)
 
+    has_course = course is not None
+    if has_course:
+        await schedule_source.startup()
+        await schedule_daily_doses.kiq(message.from_user.id)
+
     await state.clear()
     await message.answer(
         settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=course is not None),
+        reply_markup=main_menu_keyboard(has_course=has_course),
         parse_mode="HTML",
     )
 

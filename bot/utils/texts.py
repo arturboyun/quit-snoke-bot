@@ -53,10 +53,7 @@ def course_started_text(start_date: str) -> str:
 
 
 def already_has_course_text() -> str:
-    return (
-        "⚠️ У тебя уже есть активный курс.\n"
-        "Хочешь отменить его и начать новый?"
-    )
+    return "⚠️ У тебя уже есть активный курс.\nХочешь отменить его и начать новый?"
 
 
 def no_active_course_text() -> str:
@@ -73,10 +70,7 @@ def dose_reminder_text(day: int, phase: int, target: int) -> str:
 
 
 def dose_taken_text(taken_today: int, target: int) -> str:
-    return (
-        f"✅ Отлично! Приём отмечен.\n"
-        f"Сегодня принято: {taken_today}/{target} таблеток"
-    )
+    return f"✅ Отлично! Приём отмечен.\nСегодня принято: {taken_today}/{target} таблеток"
 
 
 def quit_day_text() -> str:
@@ -92,13 +86,16 @@ def quit_day_text() -> str:
 def progress_text(stats: dict) -> str:
     bar_filled = int(stats["percent_complete"] / 10)
     bar = "▓" * bar_filled + "░" * (10 - bar_filled)
-    return (
-        f"📊 <b>Прогресс курса</b>\n\n"
-        f"📅 День: {stats['day']}/{stats['total_days']}\n"
-        f"🔬 Фаза: {stats['phase']}\n"
-        f"💊 Принято сегодня: {stats['doses_taken']}/{stats['doses_target']}\n"
-        f"📈 Общий прогресс: {bar} {stats['percent_complete']}%"
-    )
+    lines = [
+        "📊 <b>Прогресс курса</b>\n",
+        f"📅 День: {stats['day']}/{stats['total_days']}",
+        f"🔬 Фаза: {stats['phase']}",
+        f"💊 Принято сегодня: {stats['doses_taken']}/{stats['doses_target']}",
+        f"📈 Общий прогресс: {bar} {stats['percent_complete']}%",
+    ]
+    if "smoke_free_days" in stats:
+        lines.append(f"🚭 Дней без сигарет: {stats['smoke_free_days']}")
+    return "\n".join(lines)
 
 
 def course_completed_text() -> str:
@@ -172,8 +169,7 @@ def ask_cigarettes_per_day_text() -> str:
 
 def ask_pack_price_text() -> str:
     return (
-        "💰 Сколько стоит пачка сигарет (в твоей валюте)?\n\n"
-        "Отправь число, например: <b>150</b>"
+        "💰 Сколько стоит пачка сигарет (в твоей валюте)?\n\nОтправь число, например: <b>150</b>"
     )
 
 
@@ -253,8 +249,8 @@ def sos_craving_text(
     days_smoke_free: int,
     cravings_resisted: int,
 ) -> str:
-    exercise = random.choice(_BREATHING_EXERCISES)  # noqa: S311
-    fact = random.choice(_MOTIVATION_FACTS)  # noqa: S311
+    exercise = random.choice(_BREATHING_EXERCISES)
+    fact = random.choice(_MOTIVATION_FACTS)
     parts = [
         "🆘 <b>Тяга к сигарете? Держись!</b>\n",
         exercise,
@@ -264,9 +260,7 @@ def sos_craving_text(
         parts.append(f"\n🚭 Ты уже <b>{days_smoke_free}</b> дн. без сигарет — не сдавайся!")
     if cravings_resisted > 0:
         parts.append(f"🛡️ Ты уже справился с тягой <b>{cravings_resisted}</b> раз!")
-    parts.append(
-        "\n⏰ <b>Тяга длится 3–5 минут. Просто подожди — она пройдёт!</b>"
-    )
+    parts.append("\n⏰ <b>Тяга длится 3–5 минут. Просто подожди — она пройдёт!</b>")
     return "\n".join(parts)
 
 
@@ -375,10 +369,7 @@ def relapse_logged_text(
 
 
 def morning_checkin_text(day: int) -> str:
-    return (
-        f"☀️ Доброе утро! День {day}/25\n\n"
-        "Как ты себя чувствуешь сегодня?"
-    )
+    return f"☀️ Доброе утро! День {day}/25\n\nКак ты себя чувствуешь сегодня?"
 
 
 def mood_logged_text(mood_emoji: str) -> str:
@@ -403,3 +394,50 @@ def mood_history_text(moods: list[tuple[str, str]]) -> str:
         for date_str, mood in moods:
             lines.append(f"  {date_str}: {emoji_map.get(mood, '❓')}")
     return "\n".join(lines)
+
+
+def phase_change_text(new_phase: int, interval_minutes: int, target_tablets: int) -> str:
+    hours = interval_minutes / 60
+    if hours == int(hours):
+        interval_str = f"{int(hours)} ч"
+    else:
+        interval_str = f"{hours:.1f} ч"
+    return (
+        f"🔄 <b>Переход на фазу {new_phase}!</b>\n\n"
+        f"Новый режим приёма:\n"
+        f"• Интервал: каждые {interval_str}\n"
+        f"• Таблеток в день: {target_tablets}\n\n"
+        "Продолжай следовать расписанию 💪"
+    )
+
+
+def missed_doses_text(missed: int, day: int) -> str:
+    return (
+        f"⚠️ Вчера (день {day}) пропущено таблеток: <b>{missed}</b>\n\n"
+        "Помни: пропущенные дозы <b>нельзя</b> удваивать. "
+        "Просто продолжай по расписанию."
+    )
+
+
+def course_completed_manual_text() -> str:
+    return (
+        "✅ Курс завершён досрочно.\n\n"
+        "Если чувствуешь тягу к курению — обратись к врачу. Удачи! 🍀"
+    )
+
+
+def course_history_text(courses: list) -> str:
+    if not courses:
+        return "📋 История курсов пуста."
+    lines = ["📋 <b>История курсов</b>\n"]
+    for i, c in enumerate(courses, 1):
+        status_emoji = {"active": "🟢", "completed": "✅", "cancelled": "🛑"}.get(
+            c.status.value,
+            "⚪",
+        )
+        lines.append(f"{i}. {status_emoji} Начат: {c.start_date.isoformat()} — {c.status.value}")
+    return "\n".join(lines)
+
+
+def dose_too_soon_text(minutes_left: int) -> str:
+    return f"⏳ Слишком рано для следующей таблетки.\nПодожди ещё {minutes_left} мин."

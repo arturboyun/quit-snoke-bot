@@ -290,6 +290,16 @@ class TestCourseHandlers:
 
 
 class TestSettingsHandlers:
+    @pytest.fixture(autouse=True)
+    def _patch_settings_taskiq(self):
+        with (
+            patch("bot.handlers.settings.schedule_source") as mock_ss,
+            patch("bot.handlers.settings.schedule_daily_doses") as mock_sdd,
+        ):
+            mock_ss.startup = AsyncMock()
+            mock_sdd.kiq = AsyncMock()
+            yield
+
     async def test_on_change_timezone(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_change_timezone
 

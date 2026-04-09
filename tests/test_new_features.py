@@ -24,7 +24,6 @@ from bot.services.course import (
     start_course,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -286,7 +285,9 @@ class TestNewTexts:
         from bot.utils.texts import mood_logged_text
 
         assert "Отлично" in mood_logged_text("good")
-        assert "Нормально" in mood_logged_text("neutral") or "Нормально" in mood_logged_text("neutral")
+        assert "Нормально" in mood_logged_text("neutral") or "Нормально" in mood_logged_text(
+            "neutral"
+        )
         assert "SOS" in mood_logged_text("bad") or "тяжёлые" in mood_logged_text("bad")
 
     def test_mood_history_text(self) -> None:
@@ -432,7 +433,9 @@ class TestNewMenuHandlers:
             await get_or_create_user(session, 903)
             # Start course 10 days ago (past quit day)
             await start_course(
-                session, 903, datetime.date.today() - datetime.timedelta(days=9),
+                session,
+                903,
+                datetime.date.today() - datetime.timedelta(days=9),
             )
             await save_smoking_profile(session, 903, 20, 150.0)
             await session.commit()
@@ -590,7 +593,10 @@ class TestSmokingProfileHandlers:
         state = _make_state()
         await on_pack_price(msg, state)
         msg.answer.assert_called_once()
-        assert "число" in msg.answer.call_args[0][0].lower() or "цену" in msg.answer.call_args[0][0].lower()
+        assert (
+            "число" in msg.answer.call_args[0][0].lower()
+            or "цену" in msg.answer.call_args[0][0].lower()
+        )
 
 
 # ── Onboarding Smoking Profile ──────────────────────────────────────────────

@@ -20,9 +20,12 @@ from bot.keyboards.inline import (
 from bot.services.course import (
     ACHIEVEMENT_DEFS,
     check_and_grant_achievements,
+    complete_course,
     get_active_course,
+    get_course_history,
     get_craving_count,
     get_doses_taken_today,
+    get_last_dose_time,
     get_mood_history,
     get_or_create_user,
     get_relapse_stats,
@@ -45,8 +48,11 @@ from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
     achievements_text,
     already_has_course_text,
+    course_completed_manual_text,
+    course_history_text,
     course_started_text,
     dose_taken_text,
+    dose_too_soon_text,
     health_timeline_text,
     help_text,
     menu_text,
@@ -163,6 +169,22 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
             )
             return
 
+        # Check minimum interval since last dose
+        last_time = await get_last_dose_time(session, course.id, day)
+        if last_time is not None:
+            last_aware = last_time if last_time.tzinfo else last_time.replace(tzinfo=datetime.UTC)
+            elapsed = (
+                now.astimezone(datetime.UTC) - last_aware.astimezone(datetime.UTC)
+            ).total_seconds()
+            min_interval = phase_info.interval_minutes * 60
+            if elapsed < min_interval:
+                minutes_left = int((min_interval - elapsed) / 60) + 1
+                await callback.answer(
+                    dose_too_soon_text(minutes_left),
+                    show_alert=True,
+                )
+                return
+
         await log_dose(
             session,
             course_id=course.id,
@@ -209,6 +231,8 @@ async def on_menu_progress(callback: CallbackQuery) -> None:
         taken = await get_doses_taken_today(session, course.id, today)
 
     stats = get_progress(day, taken)
+    if day >= QUIT_DAY:
+        stats["smoke_free_days"] = max(0, day - QUIT_DAY)
     await _safe_edit(
         callback,
         progress_text(stats),
@@ -307,7 +331,9 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
             text += f"\n\n{new_achievement_text(title, desc)}"
 
     await _safe_edit(
-        callback, text, reply_markup=main_menu_keyboard(has_course=True),
+        callback,
+        text,
+        reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer()
 
@@ -470,6 +496,49 @@ async def on_relapse_count(message: Message, state: FSMContext) -> None:
     )
 
 
+# ── Complete Course ───────────────────────────────────────────────────────────
+
+
+@router.callback_query(MenuCallback.filter(F.action == "complete_course"))
+async def on_menu_complete_course(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        course = await get_active_course(session, callback.from_user.id)
+        if not course:
+            await callback.answer("Нет активного курса", show_alert=True)
+            return
+
+        user = await get_or_create_user(session, callback.from_user.id)
+        tz = ZoneInfo(user.timezone)
+        today = datetime.datetime.now(tz).date()
+        day = get_course_day(course.start_date, today)
+
+        await complete_course(session, callback.from_user.id)
+        await session.commit()
+
+    await _safe_edit(
+        callback,
+        course_completed_manual_text(),
+        reply_markup=main_menu_keyboard(has_course=False),
+    )
+    await callback.answer()
+
+
+# ── Course History ───────────────────────────────────────────────────────────
+
+
+@router.callback_query(MenuCallback.filter(F.action == "history"))
+async def on_menu_history(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        courses = await get_course_history(session, callback.from_user.id)
+
+    await _safe_edit(
+        callback,
+        course_history_text(courses),
+        reply_markup=await _menu_kb(callback.from_user.id),
+    )
+    await callback.answer()
+
+
 # ── Mood History ─────────────────────────────────────────────────────────────
 
 
@@ -478,9 +547,7 @@ async def on_menu_mood_history(callback: CallbackQuery) -> None:
     async with session_factory() as session:
         moods = await get_mood_history(session, callback.from_user.id)
 
-    mood_list = [
-        (m.created_at.strftime("%d.%m"), m.mood) for m in moods
-    ]
+    mood_list = [(m.created_at.strftime("%d.%m"), m.mood) for m in moods]
 
     await _safe_edit(
         callback,

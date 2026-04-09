@@ -17,30 +17,51 @@ def _bot_mock():
 
 class TestSendDoseReminder:
     @patch("bot.tasks.Bot")
-    async def test_sends_message(self, mock_bot_cls) -> None:
+    async def test_sends_message(self, mock_bot_cls, mock_session_factory) -> None:
         from bot.tasks import send_dose_reminder
 
         bot = _bot_mock()
         mock_bot_cls.return_value = bot
 
-        await send_dose_reminder(user_id=111, course_id=1, day=3, phase=1)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 111)
+            await start_course(session, 111, datetime.date.today())
+            await session.commit()
+
+        # Get the actual course id
+        async with mock_session_factory() as session:
+            course = await get_active_course(session, 111)
+            course_id = course.id
+
+        await send_dose_reminder(user_id=111, course_id=course_id, day=3, phase=1)
 
         bot.send_message.assert_called_once()
         args = bot.send_message.call_args
         assert args[0][0] == 111
         assert "3/25" in args[0][1]
+        # Should include keyboard
+        assert args[1].get("reply_markup") is not None
         bot.session.close.assert_called_once()
 
     @patch("bot.tasks.Bot")
-    async def test_handles_exception(self, mock_bot_cls) -> None:
+    async def test_handles_exception(self, mock_bot_cls, mock_session_factory) -> None:
         from bot.tasks import send_dose_reminder
 
         bot = _bot_mock()
         bot.send_message = AsyncMock(side_effect=Exception("network error"))
         mock_bot_cls.return_value = bot
 
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 111)
+            await start_course(session, 111, datetime.date.today())
+            await session.commit()
+
+        async with mock_session_factory() as session:
+            course = await get_active_course(session, 111)
+            course_id = course.id
+
         # Should not raise
-        await send_dose_reminder(user_id=111, course_id=1, day=1, phase=1)
+        await send_dose_reminder(user_id=111, course_id=course_id, day=1, phase=1)
         bot.session.close.assert_called_once()
 
 

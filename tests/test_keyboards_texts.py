@@ -23,15 +23,20 @@ from bot.utils.texts import (
     ask_timezone_text,
     ask_wake_time_text,
     course_cancelled_text,
+    course_completed_manual_text,
     course_completed_text,
+    course_history_text,
     course_started_text,
     dose_reminder_text,
     dose_taken_text,
+    dose_too_soon_text,
     help_text,
     invalid_time_format_text,
     invalid_timezone_text,
     menu_text,
+    missed_doses_text,
     no_active_course_text,
+    phase_change_text,
     progress_text,
     quit_day_text,
     settings_menu_text,
@@ -266,7 +271,7 @@ class TestThrottleMiddleware:
 class TestMenuKeyboard:
     def test_main_menu_keyboard_structure(self) -> None:
         kb = main_menu_keyboard(has_course=True)
-        assert len(kb.inline_keyboard) == 7
+        assert len(kb.inline_keyboard) == 8
         all_texts = [b.text for row in kb.inline_keyboard for b in row]
         assert any("таблетку" in t.lower() for t in all_texts)
         assert any("Прогресс" in t for t in all_texts)
@@ -278,6 +283,8 @@ class TestMenuKeyboard:
         assert any("Здоровье" in t for t in all_texts)
         assert any("Достижения" in t for t in all_texts)
         assert any("Настроение" in t for t in all_texts)
+        assert any("Завершить" in t for t in all_texts)
+        assert any("История" in t for t in all_texts)
 
     def test_menu_callback(self) -> None:
         cb = MenuCallback(action="take_dose")
@@ -289,3 +296,48 @@ class TestMenuKeyboard:
         text = menu_text()
         assert len(text) > 0
         assert "Главное меню" in text
+
+    def test_menu_keyboard_no_course(self) -> None:
+        kb = main_menu_keyboard(has_course=False)
+        all_texts = [b.text for row in kb.inline_keyboard for b in row]
+        assert any("Начать" in t for t in all_texts)
+        assert not any("таблетку" in t.lower() for t in all_texts)
+
+
+class TestNewTexts:
+    def test_phase_change_text(self) -> None:
+        text = phase_change_text(2, 150, 5)
+        assert "фазу 2" in text
+        assert "5" in text
+
+    def test_missed_doses_text(self) -> None:
+        text = missed_doses_text(3, 4)
+        assert "3" in text
+        assert "день 4" in text
+        assert "удваивать" in text
+
+    def test_course_completed_manual_text(self) -> None:
+        text = course_completed_manual_text()
+        assert "завершён" in text.lower()
+
+    def test_course_history_text_empty(self) -> None:
+        text = course_history_text([])
+        assert "пуста" in text.lower()
+
+    def test_dose_too_soon_text(self) -> None:
+        text = dose_too_soon_text(15)
+        assert "15" in text
+
+    def test_progress_text_with_smoke_free_days(self) -> None:
+        stats = {
+            "day": 10,
+            "total_days": 25,
+            "phase": 2,
+            "doses_taken": 3,
+            "doses_target": 5,
+            "percent_complete": 36.0,
+            "smoke_free_days": 5,
+        }
+        text = progress_text(stats)
+        assert "без сигарет" in text
+        assert "5" in text

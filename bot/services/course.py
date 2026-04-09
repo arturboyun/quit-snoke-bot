@@ -114,11 +114,93 @@ async def update_user_settings(
     return user
 
 
+async def log_missed_doses(
+    session: AsyncSession,
+    course_id: int,
+    user_id: int,
+    day: int,
+    phase: int,
+    total_expected: int,
+) -> int:
+    """Log missed doses for a given day. Returns count of missed doses created."""
+    stmt = select(DoseLog).where(
+        DoseLog.course_id == course_id,
+        DoseLog.day == day,
+    )
+    result = await session.execute(stmt)
+    existing = len(result.scalars().all())
+
+    missed_count = total_expected - existing
+    for _ in range(max(missed_count, 0)):
+        dose = DoseLog(
+            course_id=course_id,
+            user_id=user_id,
+            scheduled_at=datetime.datetime.now(datetime.UTC),
+            taken=False,
+            taken_at=None,
+            day=day,
+            phase=phase,
+        )
+        session.add(dose)
+
+    if missed_count > 0:
+        await session.flush()
+    return max(missed_count, 0)
+
+
+async def get_last_dose_time(
+    session: AsyncSession,
+    course_id: int,
+    day: int,
+) -> datetime.datetime | None:
+    """Return the taken_at of the last confirmed dose today."""
+    stmt = (
+        select(DoseLog)
+        .where(
+            DoseLog.course_id == course_id,
+            DoseLog.day == day,
+            DoseLog.taken.is_(True),
+        )
+        .order_by(DoseLog.taken_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    dose = result.scalar_one_or_none()
+    return dose.taken_at if dose else None
+
+
+async def get_course_history(
+    session: AsyncSession,
+    user_id: int,
+) -> list[Course]:
+    """Return all courses for a user, newest first."""
+    stmt = (
+        select(Course)
+        .where(Course.user_id == user_id)
+        .order_by(Course.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def complete_course(
+    session: AsyncSession,
+    user_id: int,
+) -> Course | None:
+    """Manually mark the active course as completed."""
+    active = await get_active_course(session, user_id)
+    if active:
+        active.status = CourseStatus.COMPLETED
+        await session.flush()
+    return active
+
+
 # ── Smoking Profile ──────────────────────────────────────────────────────────
 
 
 async def get_smoking_profile(
-    session: AsyncSession, user_id: int,
+    session: AsyncSession,
+    user_id: int,
 ) -> SmokingProfile | None:
     stmt = select(SmokingProfile).where(SmokingProfile.user_id == user_id)
     result = await session.execute(stmt)
@@ -177,7 +259,9 @@ async def log_mood(session: AsyncSession, user_id: int, mood: str) -> MoodLog:
 
 
 async def get_mood_history(
-    session: AsyncSession, user_id: int, limit: int = 7,
+    session: AsyncSession,
+    user_id: int,
+    limit: int = 7,
 ) -> list[MoodLog]:
     stmt = (
         select(MoodLog)
@@ -193,7 +277,9 @@ async def get_mood_history(
 
 
 async def log_relapse(
-    session: AsyncSession, user_id: int, cigarettes: int = 1,
+    session: AsyncSession,
+    user_id: int,
+    cigarettes: int = 1,
 ) -> RelapseLog:
     entry = RelapseLog(user_id=user_id, cigarettes=cigarettes)
     session.add(entry)
@@ -227,23 +313,25 @@ ACHIEVEMENT_DEFS: dict[str, tuple[str, str]] = {
 
 
 async def get_user_achievements(
-    session: AsyncSession, user_id: int,
+    session: AsyncSession,
+    user_id: int,
 ) -> list[Achievement]:
     stmt = (
-        select(Achievement)
-        .where(Achievement.user_id == user_id)
-        .order_by(Achievement.earned_at)
+        select(Achievement).where(Achievement.user_id == user_id).order_by(Achievement.earned_at)
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
 async def grant_achievement(
-    session: AsyncSession, user_id: int, key: str,
+    session: AsyncSession,
+    user_id: int,
+    key: str,
 ) -> Achievement | None:
     """Grant an achievement if not already earned. Returns None if already exists."""
     stmt = select(Achievement).where(
-        Achievement.user_id == user_id, Achievement.key == key,
+        Achievement.user_id == user_id,
+        Achievement.key == key,
     )
     result = await session.execute(stmt)
     if result.scalar_one_or_none():
@@ -255,14 +343,20 @@ async def grant_achievement(
 
 
 async def check_and_grant_achievements(
-    session: AsyncSession, user_id: int,
+    session: AsyncSession,
+    user_id: int,
 ) -> list[str]:
     """Check all achievement conditions and grant new ones. Returns list of newly earned keys."""
     newly_earned: list[str] = []
 
     # Count total doses
-    dose_count_stmt = select(func.count()).select_from(DoseLog).where(
-        DoseLog.user_id == user_id, DoseLog.taken.is_(True),
+    dose_count_stmt = (
+        select(func.count())
+        .select_from(DoseLog)
+        .where(
+            DoseLog.user_id == user_id,
+            DoseLog.taken.is_(True),
+        )
     )
     result = await session.execute(dose_count_stmt)
     total_doses = result.scalar() or 0

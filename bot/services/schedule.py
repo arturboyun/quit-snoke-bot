@@ -60,6 +60,11 @@ def is_quit_day(day: int) -> bool:
     return day >= QUIT_DAY
 
 
+def is_first_day_of_phase(day: int) -> bool:
+    """Return True if this day is the first day of a new phase (transition day)."""
+    return day in {phase[0] for phase in PHASES}
+
+
 def calculate_dose_times(
     day: int,
     wake_time: datetime.time,

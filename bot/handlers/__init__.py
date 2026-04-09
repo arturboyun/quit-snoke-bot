@@ -9,6 +9,10 @@ from bot.handlers.start import router as start_router
 
 main_router = Router()
 main_router.include_routers(
-    start_router, course_router, menu_router, mood_router,
-    progress_router, settings_router,
+    start_router,
+    course_router,
+    menu_router,
+    mood_router,
+    progress_router,
+    settings_router,
 )

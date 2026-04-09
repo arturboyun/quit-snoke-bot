@@ -7,13 +7,13 @@ import datetime
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
-# Phase definitions: (start_day, end_day, interval_minutes, target_tablets)
-PHASES: list[tuple[int, int, int, int]] = [
-    (1, 3, 120, 6),  # Phase 1: days 1–3, every 2h, 6 tablets/day
-    (4, 12, 150, 5),  # Phase 2: days 4–12, every 2.5h, 5 tablets/day
-    (13, 16, 180, 4),  # Phase 3: days 13–16, every 3h, 4 tablets/day
-    (17, 20, 300, 3),  # Phase 4: days 17–20, every 5h, 3 tablets/day
-    (21, 25, 300, 2),  # Phase 5: days 21–25, every 5h, 1–2 tablets/day
+# Phase definitions: (start_day, end_day, interval_minutes, target_tablets, min_tablets)
+PHASES: list[tuple[int, int, int, int, int]] = [
+    (1, 3, 120, 6, 6),    # Phase 1: days 1–3, every 2h, 6 tablets/day
+    (4, 12, 150, 5, 5),   # Phase 2: days 4–12, every 2.5h, 5 tablets/day
+    (13, 16, 180, 4, 4),  # Phase 3: days 13–16, every 3h, 4 tablets/day
+    (17, 20, 300, 3, 3),  # Phase 4: days 17–20, every 5h, 3 tablets/day
+    (21, 25, 300, 2, 1),  # Phase 5: days 21–25, every 5h, 1–2 tablets/day
 ]
 
 COURSE_DAYS = 25
@@ -27,6 +27,14 @@ class PhaseInfo:
     end_day: int
     interval_minutes: int
     target_tablets: int
+    min_tablets: int
+
+    @property
+    def target_display(self) -> str:
+        """Display string for target tablets (e.g. '5' or '1–2')."""
+        if self.min_tablets == self.target_tablets:
+            return str(self.target_tablets)
+        return f"{self.min_tablets}–{self.target_tablets}"
 
 
 @dataclass(frozen=True)
@@ -38,7 +46,7 @@ class DoseSlot:
 
 def get_phase(day: int) -> PhaseInfo:
     """Return phase info for a given course day (1-based)."""
-    for i, (start, end, interval, tablets) in enumerate(PHASES, start=1):
+    for i, (start, end, interval, tablets, min_tab) in enumerate(PHASES, start=1):
         if start <= day <= end:
             return PhaseInfo(
                 phase=i,
@@ -46,6 +54,7 @@ def get_phase(day: int) -> PhaseInfo:
                 end_day=end,
                 interval_minutes=interval,
                 target_tablets=tablets,
+                min_tablets=min_tab,
             )
     raise ValueError(f"Day {day} is outside the 25-day course (valid: 1–{COURSE_DAYS})")
 
@@ -114,7 +123,7 @@ def calculate_remaining_doses_today(
     return [s for s in all_slots if s.time > now]
 
 
-def get_progress(day: int, doses_taken_today: int) -> dict[str, int | float]:
+def get_progress(day: int, doses_taken_today: int) -> dict[str, int | float | str]:
     """Return progress stats for the current day."""
     phase = get_phase(day)
     return {
@@ -122,6 +131,6 @@ def get_progress(day: int, doses_taken_today: int) -> dict[str, int | float]:
         "total_days": COURSE_DAYS,
         "phase": phase.phase,
         "doses_taken": doses_taken_today,
-        "doses_target": phase.target_tablets,
+        "doses_target": phase.target_display,  # Phase 5: "1–2", others: "6", "5", etc.
         "percent_complete": round((day - 1) / COURSE_DAYS * 100, 1),
     }

@@ -62,7 +62,7 @@ def no_active_course_text() -> str:
     return "❌ У тебя нет активного курса. Начни его через меню 👇"
 
 
-def dose_reminder_text(day: int, phase: int, target: int) -> str:
+def dose_reminder_text(day: int, phase: int, target: int | str) -> str:
     return (
         f"💊 Время принять таблетку Табекс!\n\n"
         f"📅 День {day}/25 (фаза {phase})\n"
@@ -71,7 +71,7 @@ def dose_reminder_text(day: int, phase: int, target: int) -> str:
     )
 
 
-def dose_taken_text(taken_today: int, target: int) -> str:
+def dose_taken_text(taken_today: int, target: int | str) -> str:
     return f"✅ Отлично! Приём отмечен.\nСегодня принято: {taken_today}/{target} таблеток"
 
 
@@ -142,7 +142,7 @@ def menu_text() -> str:
     return "📋 <b>Главное меню</b>\n\nВыбери действие:"
 
 
-def today_schedule_text(day: int, phase: int, times: list[str], target: int) -> str:
+def today_schedule_text(day: int, phase: int, times: list[str], target: int | str) -> str:
     times_str = "\n".join(f"  • {t}" for t in times)
     return (
         f"📅 <b>Расписание на сегодня</b>\n\n"
@@ -396,7 +396,7 @@ def mood_history_text(moods: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def phase_change_text(new_phase: int, interval_minutes: int, target_tablets: int) -> str:
+def phase_change_text(new_phase: int, interval_minutes: int, target_tablets: int | str) -> str:
     hours = interval_minutes / 60
     if hours == int(hours):
         interval_str = f"{int(hours)} ч"

@@ -1,6 +1,7 @@
 """Course management service — create, query, log doses."""
 
 import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -345,6 +346,7 @@ async def grant_achievement(
 async def check_and_grant_achievements(
     session: AsyncSession,
     user_id: int,
+    timezone: str = "UTC",
 ) -> list[str]:
     """Check all achievement conditions and grant new ones. Returns list of newly earned keys."""
     newly_earned: list[str] = []
@@ -396,7 +398,7 @@ async def check_and_grant_achievements(
         if relapse_stats["total_cigarettes"] == 0:
             from bot.services.schedule import get_course_day
 
-            today = datetime.date.today()
+            today = datetime.datetime.now(ZoneInfo(timezone)).date()
             day = get_course_day(course.start_date, today)
             smoke_free_days = max(0, day - 5)  # counting from quit day
 

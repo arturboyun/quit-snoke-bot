@@ -24,25 +24,25 @@ class TestGetPhase:
     """Verify phase boundaries match the Tabex protocol exactly."""
 
     @pytest.mark.parametrize(
-        ("day", "expected_phase", "expected_interval", "expected_tablets"),
+        ("day", "expected_phase", "expected_interval", "expected_tablets", "expected_min_tablets"),
         [
             # Phase 1: days 1–3, every 2h, 6 tablets
-            (1, 1, 120, 6),
-            (2, 1, 120, 6),
-            (3, 1, 120, 6),
+            (1, 1, 120, 6, 6),
+            (2, 1, 120, 6, 6),
+            (3, 1, 120, 6, 6),
             # Phase 2: days 4–12, every 2.5h, 5 tablets
-            (4, 2, 150, 5),
-            (8, 2, 150, 5),
-            (12, 2, 150, 5),
+            (4, 2, 150, 5, 5),
+            (8, 2, 150, 5, 5),
+            (12, 2, 150, 5, 5),
             # Phase 3: days 13–16, every 3h, 4 tablets
-            (13, 3, 180, 4),
-            (16, 3, 180, 4),
+            (13, 3, 180, 4, 4),
+            (16, 3, 180, 4, 4),
             # Phase 4: days 17–20, every 5h, 3 tablets
-            (17, 4, 300, 3),
-            (20, 4, 300, 3),
+            (17, 4, 300, 3, 3),
+            (20, 4, 300, 3, 3),
             # Phase 5: days 21–25, every 5h, 1–2 tablets
-            (21, 5, 300, 2),
-            (25, 5, 300, 2),
+            (21, 5, 300, 2, 1),
+            (25, 5, 300, 2, 1),
         ],
     )
     def test_correct_phase_for_each_day(
@@ -51,11 +51,13 @@ class TestGetPhase:
         expected_phase: int,
         expected_interval: int,
         expected_tablets: int,
+        expected_min_tablets: int,
     ) -> None:
         phase = get_phase(day)
         assert phase.phase == expected_phase
         assert phase.interval_minutes == expected_interval
         assert phase.target_tablets == expected_tablets
+        assert phase.min_tablets == expected_min_tablets
 
     def test_day_zero_raises(self) -> None:
         with pytest.raises(ValueError, match="outside the 25-day course"):
@@ -74,6 +76,15 @@ class TestGetPhase:
         assert isinstance(info, PhaseInfo)
         assert info.start_day == 1
         assert info.end_day == 3
+        assert info.min_tablets == 6
+
+    def test_phase5_target_display(self) -> None:
+        info = get_phase(21)
+        assert info.target_display == "1–2"
+
+    def test_phase1_target_display(self) -> None:
+        info = get_phase(1)
+        assert info.target_display == "6"
 
 
 class TestGetCourseDay:
@@ -336,19 +347,20 @@ class TestGetProgress:
         assert stats["total_days"] == 25
         assert stats["phase"] == 1
         assert stats["doses_taken"] == 0
-        assert stats["doses_target"] == 6
+        assert stats["doses_target"] == "6"
         assert stats["percent_complete"] == 0.0
 
     def test_day_13_progress(self) -> None:
         stats = get_progress(13, 3)
         assert stats["phase"] == 3
         assert stats["doses_taken"] == 3
-        assert stats["doses_target"] == 4
+        assert stats["doses_target"] == "4"
         assert stats["percent_complete"] == 48.0
 
     def test_day_25_complete(self) -> None:
         stats = get_progress(25, 2)
         assert stats["percent_complete"] == 96.0
+        assert stats["doses_target"] == "1–2"
 
 
 class TestIsFirstDayOfPhase:
@@ -387,7 +399,7 @@ class TestProtocolConstants:
     def test_phases_cover_all_days(self) -> None:
         """Every day 1–25 must belong to exactly one phase."""
         covered = set()
-        for start, end, _, _ in PHASES:
+        for start, end, _, _, _ in PHASES:
             for d in range(start, end + 1):
                 assert d not in covered, f"Day {d} is in multiple phases"
                 covered.add(d)

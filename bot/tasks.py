@@ -10,7 +10,12 @@ from bot.config import settings
 from bot.db.engine import session_factory
 from bot.keyboards.inline import dose_taken_keyboard
 from bot.models.course import CourseStatus
-from bot.services.course import get_active_course, get_or_create_user, log_missed_doses
+from bot.services.course import (
+    get_active_course,
+    get_or_create_user,
+    grant_achievement,
+    log_missed_doses,
+)
 from bot.services.schedule import (
     QUIT_DAY,
     calculate_dose_times,
@@ -56,7 +61,7 @@ async def send_dose_reminder(user_id: int, course_id: int, day: int, phase: int)
                     return
 
         phase_info = get_phase(day)
-        text = dose_reminder_text(day, phase, phase_info.target_tablets)
+        text = dose_reminder_text(day, phase, phase_info.target_display)
         kb = dose_taken_keyboard(course_id=course_id, day=day, phase=phase)
         await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -94,6 +99,7 @@ async def schedule_daily_doses(user_id: int) -> None:
         # Course ended
         if day > 25:
             course.status = CourseStatus.COMPLETED
+            await grant_achievement(session, user_id, "course_completed")
             await session.commit()
             bot = Bot(token=settings.token)
             try:
@@ -115,7 +121,7 @@ async def schedule_daily_doses(user_id: int) -> None:
                 user_id,
                 day=prev_day,
                 phase=prev_phase.phase,
-                total_expected=prev_phase.target_tablets,
+                total_expected=prev_phase.min_tablets,  # Phase 5: 1 (not 2)
             )
             if missed > 0:
                 bot = Bot(token=settings.token)
@@ -138,7 +144,7 @@ async def schedule_daily_doses(user_id: int) -> None:
                     phase_change_text(
                         phase_info.phase,
                         phase_info.interval_minutes,
-                        phase_info.target_tablets,
+                        phase_info.target_display,
                     ),
                     parse_mode="HTML",
                 )

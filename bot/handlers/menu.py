@@ -31,6 +31,7 @@ from bot.services.course import (
     get_relapse_stats,
     get_smoking_profile,
     get_user_achievements,
+    grant_achievement,
     log_craving,
     log_dose,
     log_relapse,
@@ -164,7 +165,7 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
         taken = await get_doses_taken_today(session, course.id, today)
         if taken >= phase_info.target_tablets:
             await callback.answer(
-                f"Сегодня уже принято {taken}/{phase_info.target_tablets} таблеток",
+                f"Сегодня уже принято {taken}/{phase_info.target_display} таблеток",
                 show_alert=True,
             )
             return
@@ -194,10 +195,12 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
             phase=phase_info.phase,
         )
         taken = await get_doses_taken_today(session, course.id, today)
-        newly_earned = await check_and_grant_achievements(session, callback.from_user.id)
+        newly_earned = await check_and_grant_achievements(
+            session, callback.from_user.id, timezone=user.timezone
+        )
         await session.commit()
 
-    text = dose_taken_text(taken, phase_info.target_tablets)
+    text = dose_taken_text(taken, phase_info.target_display)
     for key in newly_earned:
         if key in ACHIEVEMENT_DEFS:
             title, desc = ACHIEVEMENT_DEFS[key]
@@ -270,7 +273,7 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
 
     await _safe_edit(
         callback,
-        today_schedule_text(day, phase_info.phase, times, phase_info.target_tablets),
+        today_schedule_text(day, phase_info.phase, times, phase_info.target_display),
         reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer()
@@ -319,7 +322,9 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
 
         await log_craving(session, callback.from_user.id)
         cravings = await get_craving_count(session, callback.from_user.id)
-        newly_earned = await check_and_grant_achievements(session, callback.from_user.id)
+        newly_earned = await check_and_grant_achievements(
+            session, callback.from_user.id, timezone=user.timezone
+        )
         await session.commit()
 
     text = sos_craving_text(days_smoke_free, cravings)
@@ -432,8 +437,11 @@ async def on_menu_health(callback: CallbackQuery) -> None:
 @router.callback_query(MenuCallback.filter(F.action == "achievements"))
 async def on_menu_achievements(callback: CallbackQuery) -> None:
     async with session_factory() as session:
+        user = await get_or_create_user(session, callback.from_user.id)
         earned = await get_user_achievements(session, callback.from_user.id)
-        await check_and_grant_achievements(session, callback.from_user.id)
+        await check_and_grant_achievements(
+            session, callback.from_user.id, timezone=user.timezone
+        )
         earned = await get_user_achievements(session, callback.from_user.id)
         await session.commit()
 
@@ -508,6 +516,7 @@ async def on_menu_complete_course(callback: CallbackQuery) -> None:
             return
 
         await complete_course(session, callback.from_user.id)
+        await grant_achievement(session, callback.from_user.id, "course_completed")
         await session.commit()
 
     await _safe_edit(

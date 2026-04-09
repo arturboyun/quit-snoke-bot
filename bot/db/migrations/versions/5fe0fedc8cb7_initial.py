@@ -5,16 +5,15 @@ Revises:
 Create Date: 2026-04-09 22:19:29.781047
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = '5fe0fedc8cb7'
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -31,7 +30,11 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('user_id', sa.BigInteger(), nullable=False),
     sa.Column('start_date', sa.Date(), nullable=False),
-    sa.Column('status', sa.Enum('ACTIVE', 'COMPLETED', 'CANCELLED', name='coursestatus'), nullable=False),
+    sa.Column(
+        'status',
+        sa.Enum('ACTIVE', 'COMPLETED', 'CANCELLED', name='coursestatus'),
+        nullable=False,
+    ),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')

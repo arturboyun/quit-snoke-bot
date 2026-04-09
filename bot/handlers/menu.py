@@ -507,11 +507,6 @@ async def on_menu_complete_course(callback: CallbackQuery) -> None:
             await callback.answer("Нет активного курса", show_alert=True)
             return
 
-        user = await get_or_create_user(session, callback.from_user.id)
-        tz = ZoneInfo(user.timezone)
-        today = datetime.datetime.now(tz).date()
-        day = get_course_day(course.start_date, today)
-
         await complete_course(session, callback.from_user.id)
         await session.commit()
 

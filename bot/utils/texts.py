@@ -1,5 +1,7 @@
 """All user-facing strings (Russian). Single source for future i18n."""
 
+import random
+
 
 def welcome_text() -> str:
     return (
@@ -198,8 +200,6 @@ def no_smoking_profile_text() -> str:
 
 
 # ── SOS Craving ──────────────────────────────────────────────────────────────
-
-import random
 
 _BREATHING_EXERCISES = [
     (

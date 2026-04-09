@@ -45,7 +45,7 @@ class OnboardingStates(StatesGroup):
 async def cmd_start(message: Message, state: FSMContext) -> None:
     async with session_factory() as session:
         existing = await session.get(User, message.from_user.id)
-        user = await get_or_create_user(session, message.from_user.id)
+        await get_or_create_user(session, message.from_user.id)
         await session.commit()
 
     if existing:

@@ -22,7 +22,7 @@ from bot.services.course import (
     log_dose,
     start_course,
 )
-from bot.services.schedule import get_phase
+from bot.services.schedule import calculate_remaining_doses_today, get_phase
 from bot.taskiq_broker import schedule_source
 from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
@@ -111,11 +111,17 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
         now_time = now.time()
         if user.sleep_time > user.wake_time:
             if now_time < user.wake_time or now_time >= user.sleep_time:
-                await callback.answer("Сейчас время сна — таблетку принимать не нужно", show_alert=True)
+                await callback.answer(
+                    "Сейчас время сна — таблетку принимать не нужно",
+                    show_alert=True,
+                )
                 return
         else:
             if user.sleep_time <= now_time < user.wake_time:
-                await callback.answer("Сейчас время сна — таблетку принимать не нужно", show_alert=True)
+                await callback.answer(
+                    "Сейчас время сна — таблетку принимать не нужно",
+                    show_alert=True,
+                )
                 return
 
         phase_info = get_phase(callback_data.day)
@@ -160,8 +166,19 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
         )
         await session.commit()
 
+    # Calculate next dose time
+    remaining = calculate_remaining_doses_today(
+        day=callback_data.day,
+        wake_time=user.wake_time,
+        sleep_time=user.sleep_time,
+        course_start_date=active.start_date,
+        timezone=user.timezone,
+        now=now,
+    )
+    next_time = remaining[0].time.strftime("%H:%M") if remaining else None
+
     await callback.message.edit_text(
-        dose_taken_text(taken, phase_info.target_display),
+        dose_taken_text(taken, phase_info.target_display, next_time),
         parse_mode="HTML",
     )
     await callback.answer("✅ Отмечено!")

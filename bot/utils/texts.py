@@ -71,8 +71,13 @@ def dose_reminder_text(day: int, phase: int, target: int | str) -> str:
     )
 
 
-def dose_taken_text(taken_today: int, target: int | str) -> str:
-    return f"✅ Отлично! Приём отмечен.\nСегодня принято: {taken_today}/{target} таблеток"
+def dose_taken_text(
+    taken_today: int, target: int | str, next_dose_time: str | None = None,
+) -> str:
+    text = f"✅ Отлично! Приём отмечен.\nСегодня принято: {taken_today}/{target} таблеток"
+    if next_dose_time:
+        text += f"\n\n⏰ Следующий приём: <b>{next_dose_time}</b>"
+    return text
 
 
 def quit_day_text() -> str:
@@ -134,20 +139,34 @@ def help_text() -> str:
         "🏥 <b>Здоровье</b> — таймлайн восстановления\n"
         "🏆 <b>Достижения</b> — бейджи и награды\n"
         "📝 <b>Настроение</b> — история самочувствия\n\n"
-        "Если меню пропало — отправь /start"
+        "Команды:\n"
+        "/start — перезапуск бота\n"
+        "/menu — открыть главное меню"
     )
 
 
-def menu_text() -> str:
+def menu_text(day: int | None = None, phase: int | None = None) -> str:
+    if day is not None and phase is not None:
+        return f"📋 <b>Главное меню</b> — День {day}/25 (фаза {phase})\n\nВыбери действие:"
     return "📋 <b>Главное меню</b>\n\nВыбери действие:"
 
 
-def today_schedule_text(day: int, phase: int, times: list[str], target: int | str) -> str:
-    times_str = "\n".join(f"  • {t}" for t in times)
+def today_schedule_text(
+    day: int, phase: int, times: list[str], target: int | str, taken: int = 0,
+) -> str:
+    lines = []
+    for i, t in enumerate(times):
+        if i < taken:
+            lines.append(f"  ✅ <s>{t}</s>")
+        elif i == taken:
+            lines.append(f"  👉 <b>{t}</b> — следующий")
+        else:
+            lines.append(f"  ⏳ {t}")
+    times_str = "\n".join(lines)
     return (
         f"📅 <b>Расписание на сегодня</b>\n\n"
         f"День {day}/25 (фаза {phase})\n"
-        f"Цель: {target} таблеток\n\n"
+        f"Цель: {target} таблеток | Принято: {taken}\n\n"
         f"⏰ Время приёма:\n{times_str}"
     )
 
@@ -248,6 +267,7 @@ _MOTIVATION_FACTS = [
 def sos_craving_text(
     days_smoke_free: int,
     cravings_resisted: int,
+    hours_since_last_smoke: float | None = None,
 ) -> str:
     exercise = random.choice(_BREATHING_EXERCISES)
     fact = random.choice(_MOTIVATION_FACTS)
@@ -258,6 +278,14 @@ def sos_craving_text(
     ]
     if days_smoke_free > 0:
         parts.append(f"\n🚭 Ты уже <b>{days_smoke_free}</b> дн. без сигарет — не сдавайся!")
+    elif hours_since_last_smoke is not None and hours_since_last_smoke > 0:
+        if hours_since_last_smoke < 1:
+            time_str = f"{int(hours_since_last_smoke * 60)} мин"
+        elif hours_since_last_smoke < 24:
+            time_str = f"{int(hours_since_last_smoke)} ч"
+        else:
+            time_str = f"{int(hours_since_last_smoke / 24)} дн"
+        parts.append(f"\n🚭 Без сигарет уже <b>{time_str}</b> — каждый час на счету!")
     if cravings_resisted > 0:
         parts.append(f"🛡️ Ты уже справился с тягой <b>{cravings_resisted}</b> раз!")
     parts.append("\n⏰ <b>Тяга длится 3–5 минут. Просто подожди — она пройдёт!</b>")
@@ -416,6 +444,28 @@ def missed_doses_text(missed: int, day: int) -> str:
         f"⚠️ Вчера (день {day}) пропущено таблеток: <b>{missed}</b>\n\n"
         "Помни: пропущенные дозы <b>нельзя</b> удваивать. "
         "Просто продолжай по расписанию."
+    )
+
+
+def confirm_complete_text() -> str:
+    return (
+        "⚠️ <b>Завершить курс досрочно?</b>\n\n"
+        "Рекомендуется пройти все 25 дней для максимального эффекта.\n"
+        "Ты уверен?"
+    )
+
+
+def confirm_start_course_text() -> str:
+    return (
+        "🚀 <b>Начать 25-дневный курс Табекс?</b>\n\n"
+        "📋 Схема приёма:\n"
+        "• Дни 1–3: каждые 2 часа (6 таб/день)\n"
+        "• Дни 4–12: каждые 2.5 часа (5 таб/день)\n"
+        "• Дни 13–16: каждые 3 часа (4 таб/день)\n"
+        "• Дни 17–20: каждые 5 часов (3 таб/день)\n"
+        "• Дни 21–25: каждые 5 часов (1–2 таб/день)\n\n"
+        "⚠️ <b>На 5-й день нужно полностью бросить курить!</b>\n\n"
+        "Готов начать?"
     )
 
 

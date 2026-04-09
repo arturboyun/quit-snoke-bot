@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -13,6 +14,7 @@ from bot.db.engine import session_factory
 from bot.keyboards.inline import (
     MenuCallback,
     confirm_cancel_keyboard,
+    confirm_complete_keyboard,
     confirm_start_keyboard,
     main_menu_keyboard,
     settings_keyboard,
@@ -36,23 +38,22 @@ from bot.services.course import (
     log_craving,
     log_dose,
     log_relapse,
-    start_course,
 )
 from bot.services.schedule import (
     QUIT_DAY,
     calculate_dose_times,
+    calculate_remaining_doses_today,
     get_course_day,
     get_phase,
     get_progress,
 )
-from bot.taskiq_broker import schedule_source
-from bot.tasks import schedule_daily_doses, schedule_next_day
 from bot.utils.texts import (
     achievements_text,
     already_has_course_text,
+    confirm_complete_text,
+    confirm_start_course_text,
     course_completed_manual_text,
     course_history_text,
-    course_started_text,
     dose_taken_text,
     dose_too_soon_text,
     health_timeline_text,
@@ -90,10 +91,33 @@ async def _menu_kb(user_id: int) -> main_menu_keyboard:
     return main_menu_keyboard(has_course=course is not None)
 
 
+async def _menu_context(user_id: int) -> tuple:
+    """Return (keyboard, menu_text_str) with dynamic day/phase info."""
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+        if not course:
+            return main_menu_keyboard(has_course=False), menu_text()
+        user = await get_or_create_user(session, user_id)
+    tz = ZoneInfo(user.timezone)
+    today = datetime.datetime.now(tz).date()
+    day = get_course_day(course.start_date, today)
+    if 1 <= day <= 25:
+        phase_info = get_phase(day)
+        return main_menu_keyboard(has_course=True), menu_text(day, phase_info.phase)
+    return main_menu_keyboard(has_course=True), menu_text()
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    kb, text = await _menu_context(message.from_user.id)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
 @router.callback_query(MenuCallback.filter(F.action == "back"))
 async def on_menu_back(callback: CallbackQuery) -> None:
-    kb = await _menu_kb(callback.from_user.id)
-    await _safe_edit(callback, menu_text(), reply_markup=kb)
+    kb, text = await _menu_context(callback.from_user.id)
+    await _safe_edit(callback, text, reply_markup=kb)
     await callback.answer()
 
 
@@ -110,21 +134,13 @@ async def on_menu_start_course(callback: CallbackQuery) -> None:
             await callback.answer()
             return
 
-        user = await get_or_create_user(session, callback.from_user.id)
-        today = datetime.datetime.now(ZoneInfo(user.timezone)).date()
-        await start_course(session, callback.from_user.id, today)
-        await session.commit()
-
+    # No active course — show confirmation with protocol summary
     await _safe_edit(
         callback,
-        course_started_text(today.isoformat()),
-        reply_markup=main_menu_keyboard(has_course=True),
+        confirm_start_course_text(),
+        reply_markup=confirm_start_keyboard(),
     )
     await callback.answer()
-
-    await schedule_source.startup()
-    await schedule_daily_doses.kiq(callback.from_user.id)
-    await schedule_next_day.kiq(callback.from_user.id)
 
 
 @router.callback_query(MenuCallback.filter(F.action == "cancel_course"))
@@ -216,7 +232,18 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
         )
         await session.commit()
 
-    text = dose_taken_text(taken, phase_info.target_display)
+    # Calculate next dose time
+    remaining = calculate_remaining_doses_today(
+        day=day,
+        wake_time=user.wake_time,
+        sleep_time=user.sleep_time,
+        course_start_date=course.start_date,
+        timezone=user.timezone,
+        now=now,
+    )
+    next_time = remaining[0].time.strftime("%H:%M") if remaining else None
+
+    text = dose_taken_text(taken, phase_info.target_display, next_time)
     for key in newly_earned:
         if key in ACHIEVEMENT_DEFS:
             title, desc = ACHIEVEMENT_DEFS[key]
@@ -284,6 +311,8 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
             await callback.answer("Курс завершён", show_alert=True)
             return
 
+        taken = await get_doses_taken_today(session, course.id, today)
+
     phase_info = get_phase(day)
     slots = calculate_dose_times(
         day=day,
@@ -296,7 +325,7 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
 
     await _safe_edit(
         callback,
-        today_schedule_text(day, phase_info.phase, times, phase_info.target_display),
+        today_schedule_text(day, phase_info.phase, times, phase_info.target_display, taken),
         reply_markup=main_menu_keyboard(has_course=True),
     )
     await callback.answer()
@@ -339,15 +368,28 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
 
         user = await get_or_create_user(session, callback.from_user.id)
         tz = ZoneInfo(user.timezone)
-        today = datetime.datetime.now(tz).date()
+        now = datetime.datetime.now(tz)
+        today = now.date()
         day = get_course_day(course.start_date, today)
 
-        # Only show smoke-free days if no relapses
+        # Smoke-free info
         relapse_stats = await get_relapse_stats(session, callback.from_user.id)
+        hours_since_last_smoke = None
         if relapse_stats["total_cigarettes"] == 0 and day >= QUIT_DAY:
             days_smoke_free = max(0, day - QUIT_DAY)
         else:
             days_smoke_free = 0
+            # Show hours since last relapse for motivation
+            last_relapse = await get_last_relapse_time(session, callback.from_user.id)
+            if last_relapse is not None:
+                lr = last_relapse if last_relapse.tzinfo else last_relapse.replace(
+                    tzinfo=datetime.UTC
+                )
+                hours_since_last_smoke = max(
+                    0.0,
+                    (now.astimezone(datetime.UTC) - lr.astimezone(datetime.UTC)).total_seconds()
+                    / 3600,
+                )
 
         await log_craving(session, callback.from_user.id)
         cravings = await get_craving_count(session, callback.from_user.id)
@@ -356,7 +398,7 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
         )
         await session.commit()
 
-    text = sos_craving_text(days_smoke_free, cravings)
+    text = sos_craving_text(days_smoke_free, cravings, hours_since_last_smoke)
 
     # Notify about new achievements
     for key in newly_earned:
@@ -558,6 +600,22 @@ async def on_relapse_count(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(MenuCallback.filter(F.action == "complete_course"))
 async def on_menu_complete_course(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        course = await get_active_course(session, callback.from_user.id)
+        if not course:
+            await callback.answer("Нет активного курса", show_alert=True)
+            return
+
+    await _safe_edit(
+        callback,
+        confirm_complete_text(),
+        reply_markup=confirm_complete_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(MenuCallback.filter(F.action == "confirm_complete"))
+async def on_confirm_complete(callback: CallbackQuery) -> None:
     async with session_factory() as session:
         course = await get_active_course(session, callback.from_user.id)
         if not course:

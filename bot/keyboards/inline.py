@@ -29,11 +29,15 @@ class MoodCallback(CallbackData, prefix="mood"):
 
 POPULAR_TIMEZONES = [
     "Europe/Kyiv",
+    "Europe/Minsk",
     "Europe/Warsaw",
     "Europe/Berlin",
     "Europe/London",
-    "America/New_York",
+    "Asia/Almaty",
+    "Asia/Tashkent",
+    "Asia/Tbilisi",
     "Asia/Istanbul",
+    "America/New_York",
 ]
 
 
@@ -83,6 +87,23 @@ def confirm_cancel_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="Нет, продолжить",
                     callback_data=CourseCallback(action="cancel").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def confirm_complete_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, завершить",
+                    callback_data=MenuCallback(action="confirm_complete").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="Нет, продолжить",
+                    callback_data=MenuCallback(action="back").pack(),
                 ),
             ],
         ],

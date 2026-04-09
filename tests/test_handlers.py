@@ -157,16 +157,10 @@ class TestCourseHandlers:
             patch("bot.handlers.course.schedule_source") as mock_ss,
             patch("bot.handlers.course.schedule_daily_doses") as mock_sdd,
             patch("bot.handlers.course.schedule_next_day") as mock_snd,
-            patch("bot.handlers.menu.schedule_source") as mock_ss2,
-            patch("bot.handlers.menu.schedule_daily_doses") as mock_sdd2,
-            patch("bot.handlers.menu.schedule_next_day") as mock_snd2,
         ):
             mock_ss.startup = AsyncMock()
             mock_sdd.kiq = AsyncMock()
             mock_snd.kiq = AsyncMock()
-            mock_ss2.startup = AsyncMock()
-            mock_sdd2.kiq = AsyncMock()
-            mock_snd2.kiq = AsyncMock()
             self.mock_schedule_source = mock_ss
             self.mock_schedule_daily = mock_sdd
             self.mock_schedule_next = mock_snd
@@ -182,7 +176,8 @@ class TestCourseHandlers:
 
         await on_menu_start_course(cb)
         cb.message.edit_text.assert_called_once()
-        assert "Курс начат" in cb.message.edit_text.call_args[0][0]
+        # Now shows confirmation instead of creating immediately
+        assert "Готов начать" in cb.message.edit_text.call_args[0][0]
 
     async def test_start_course_already_active(self, mock_session_factory) -> None:
         from bot.handlers.menu import on_menu_start_course
@@ -269,9 +264,18 @@ class TestCourseHandlers:
         cb.answer.assert_called_once()
         assert "не найден" in cb.answer.call_args[0][0].lower()
 
-    async def test_on_dose_taken_success(self, mock_session_factory) -> None:
+    @patch("bot.handlers.course.datetime")
+    async def test_on_dose_taken_success(self, mock_dt, mock_session_factory) -> None:
         from bot.handlers.course import on_dose_taken
         from bot.keyboards.inline import DoseCallback
+
+        # Fix time to midday so waking-hours check passes
+        mock_dt.datetime.now.return_value = datetime.datetime(
+            2026, 4, 10, 12, 0, tzinfo=datetime.UTC
+        )
+        mock_dt.UTC = datetime.UTC
+        mock_dt.datetime.combine = datetime.datetime.combine
+        mock_dt.timedelta = datetime.timedelta
 
         cb = _make_callback(user_id=307)
         async with mock_session_factory() as session:
@@ -470,8 +474,17 @@ class TestMenuHandlers:
         cb.answer.assert_called_once()
         assert "Нет активного курса" in cb.answer.call_args[0][0]
 
-    async def test_on_menu_take_dose_success(self, mock_session_factory) -> None:
+    @patch("bot.handlers.menu.datetime")
+    async def test_on_menu_take_dose_success(self, mock_dt, mock_session_factory) -> None:
         from bot.handlers.menu import on_menu_take_dose
+
+        # Fix time to midday so waking-hours check passes
+        mock_dt.datetime.now.return_value = datetime.datetime(
+            2026, 4, 10, 12, 0, tzinfo=datetime.UTC
+        )
+        mock_dt.UTC = datetime.UTC
+        mock_dt.datetime.combine = datetime.datetime.combine
+        mock_dt.timedelta = datetime.timedelta
 
         cb = _make_callback(user_id=501)
         async with mock_session_factory() as session:

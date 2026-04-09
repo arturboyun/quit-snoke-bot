@@ -103,6 +103,8 @@ class TestScheduleDailyDoses:
         mock_send.schedule_by_time.assert_not_called()
 
     @patch("bot.tasks.schedule_source")
+    @patch("bot.tasks.send_progress_summary")
+    @patch("bot.tasks.send_morning_checkin")
     @patch("bot.tasks.send_dose_followup")
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
@@ -111,6 +113,8 @@ class TestScheduleDailyDoses:
         mock_bot_cls,
         mock_send,
         mock_followup,
+        mock_checkin,
+        mock_summary,
         mock_sched_src,
         mock_session_factory,
     ) -> None:
@@ -118,6 +122,8 @@ class TestScheduleDailyDoses:
 
         mock_send.schedule_by_time = AsyncMock()
         mock_followup.schedule_by_time = AsyncMock()
+        mock_checkin.schedule_by_time = AsyncMock()
+        mock_summary.schedule_by_time = AsyncMock()
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 601)
@@ -183,6 +189,8 @@ class TestScheduleDailyDoses:
         # No bot messages, no errors
 
     @patch("bot.tasks.schedule_source")
+    @patch("bot.tasks.send_progress_summary")
+    @patch("bot.tasks.send_morning_checkin")
     @patch("bot.tasks.send_dose_followup")
     @patch("bot.tasks.send_dose_reminder")
     @patch("bot.tasks.Bot")
@@ -191,6 +199,8 @@ class TestScheduleDailyDoses:
         mock_bot_cls,
         mock_send,
         mock_followup,
+        mock_checkin,
+        mock_summary,
         mock_sched_src,
         mock_session_factory,
     ) -> None:
@@ -200,6 +210,8 @@ class TestScheduleDailyDoses:
         mock_bot_cls.return_value = bot
         mock_send.schedule_by_time = AsyncMock()
         mock_followup.schedule_by_time = AsyncMock()
+        mock_checkin.schedule_by_time = AsyncMock()
+        mock_summary.schedule_by_time = AsyncMock()
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 604)

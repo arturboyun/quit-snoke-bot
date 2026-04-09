@@ -376,9 +376,9 @@ class TestNewMenuHandlers:
     @pytest.fixture(autouse=True)
     def _patch_taskiq(self):
         with (
-            patch("bot.handlers.menu.schedule_source") as mock_ss,
-            patch("bot.handlers.menu.schedule_daily_doses") as mock_sdd,
-            patch("bot.handlers.menu.schedule_next_day") as mock_snd,
+            patch("bot.handlers.course.schedule_source") as mock_ss,
+            patch("bot.handlers.course.schedule_daily_doses") as mock_sdd,
+            patch("bot.handlers.course.schedule_next_day") as mock_snd,
         ):
             mock_ss.startup = AsyncMock()
             mock_sdd.kiq = AsyncMock()

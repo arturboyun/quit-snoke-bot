@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: bot
+      POSTGRES_DB: quit_smoke
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot -d quit_smoke"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build: .
+    command: uv run alembic upgrade head
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_DB_URL: postgresql+asyncpg://bot:bot@postgres:5432/quit_smoke
+      BOT_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bot:
+    build: .
+    command: uv run python -m bot
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_DB_URL: postgresql+asyncpg://bot:bot@postgres:5432/quit_smoke
+      BOT_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: uv run taskiq worker bot.taskiq_broker:broker --fs-discover
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_DB_URL: postgresql+asyncpg://bot:bot@postgres:5432/quit_smoke
+      BOT_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: uv run taskiq scheduler bot.taskiq_broker:scheduler --skip-first-run
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_DB_URL: postgresql+asyncpg://bot:bot@postgres:5432/quit_smoke
+      BOT_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:

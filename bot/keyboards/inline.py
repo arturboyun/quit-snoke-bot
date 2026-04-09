@@ -1,0 +1,152 @@
+from aiogram.filters.callback_data import CallbackData
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+
+class DoseCallback(CallbackData, prefix="dose"):
+    action: str  # "taken"
+    course_id: int
+    day: int
+    phase: int
+
+
+class CourseCallback(CallbackData, prefix="course"):
+    action: str  # "confirm_start", "cancel", "confirm_cancel"
+
+
+class SettingsCallback(CallbackData, prefix="settings"):
+    action: str  # "timezone", "wake_time", "sleep_time"
+
+
+class MenuCallback(CallbackData, prefix="menu"):
+    action: str  # "take_dose", "progress", "schedule", "settings", "help"
+
+
+POPULAR_TIMEZONES = [
+    "Europe/Kyiv",
+    "Europe/Warsaw",
+    "Europe/Berlin",
+    "Europe/London",
+    "America/New_York",
+    "Asia/Istanbul",
+]
+
+
+def dose_taken_keyboard(course_id: int, day: int, phase: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Принял таблетку",
+                    callback_data=DoseCallback(
+                        action="taken", course_id=course_id, day=day, phase=phase,
+                    ).pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def confirm_start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🚀 Начать новый курс",
+                    callback_data=CourseCallback(action="confirm_start").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data=CourseCallback(action="cancel").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def confirm_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛑 Да, отменить",
+                    callback_data=CourseCallback(action="confirm_cancel").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="Нет, продолжить",
+                    callback_data=CourseCallback(action="cancel").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def timezone_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=tz, callback_data=f"tz:{tz}")]
+        for tz in POPULAR_TIMEZONES
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def settings_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🌍 Часовой пояс",
+                    callback_data=SettingsCallback(action="timezone").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⏰ Время подъёма",
+                    callback_data=SettingsCallback(action="wake_time").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🌙 Время сна",
+                    callback_data=SettingsCallback(action="sleep_time").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Назад",
+                    callback_data=MenuCallback(action="back").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💊 Принять таблетку",
+                    callback_data=MenuCallback(action="take_dose").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📊 Прогресс",
+                    callback_data=MenuCallback(action="progress").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="🕐 Расписание",
+                    callback_data=MenuCallback(action="schedule").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⚙️ Настройки",
+                    callback_data=MenuCallback(action="settings").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="❓ Помощь",
+                    callback_data=MenuCallback(action="help").pack(),
+                ),
+            ],
+        ],
+    )

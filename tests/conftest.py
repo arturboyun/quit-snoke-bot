@@ -67,6 +67,7 @@ async def mock_session_factory(db_engine):
         "bot.handlers.course.session_factory",
         "bot.handlers.settings.session_factory",
         "bot.handlers.menu.session_factory",
+        "bot.handlers.mood.session_factory",
         "bot.tasks.session_factory",
     ]
     patches = [patch(t, _factory) for t in targets]

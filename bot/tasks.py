@@ -21,6 +21,7 @@ from bot.taskiq_broker import broker, schedule_source
 from bot.utils.texts import (
     course_completed_text,
     dose_reminder_text,
+    morning_checkin_text,
     progress_text,
     quit_day_text,
 )
@@ -97,6 +98,16 @@ async def schedule_daily_doses(user_id: int) -> None:
         )
 
         now = datetime.datetime.now(tz)
+
+        # Schedule morning check-in (5 min after wake time)
+        wake_dt = datetime.datetime.combine(
+            today, user.wake_time, tzinfo=tz,
+        ) + datetime.timedelta(minutes=5)
+        if wake_dt > now:
+            await send_morning_checkin.schedule_by_time(
+                schedule_source, wake_dt, user_id,
+            )
+
         for slot in slots:
             if slot.time <= now:
                 continue
@@ -187,5 +198,41 @@ async def send_progress_summary(user_id: int) -> None:
     bot = Bot(token=settings.token)
     try:
         await bot.send_message(user_id, progress_text(stats))
+    finally:
+        await bot.session.close()
+
+
+@broker.task
+async def send_morning_checkin(user_id: int) -> None:
+    """Send morning check-in with mood buttons."""
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+        if not course:
+            return
+
+        user = course.user
+        if user is None:
+            from bot.services.course import get_or_create_user
+
+            user = await get_or_create_user(session, user_id)
+
+        tz = ZoneInfo(user.timezone)
+        today = datetime.datetime.now(tz).date()
+        day = get_course_day(course.start_date, today)
+
+        if day < 1 or day > 25:
+            return
+
+    from bot.keyboards.inline import mood_keyboard
+
+    bot = Bot(token=settings.token)
+    try:
+        await bot.send_message(
+            user_id,
+            morning_checkin_text(day),
+            reply_markup=mood_keyboard(),
+        )
+    except Exception:
+        logger.exception("Failed to send morning check-in to user %d", user_id)
     finally:
         await bot.session.close()

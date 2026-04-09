@@ -97,9 +97,9 @@ class TestKeyboards:
         for tz in POPULAR_TIMEZONES:
             assert tz in all_texts
 
-    def test_settings_keyboard_four_rows(self) -> None:
+    def test_settings_keyboard_five_rows(self) -> None:
         kb = settings_keyboard()
-        assert len(kb.inline_keyboard) == 4  # tz, wake, sleep, back
+        assert len(kb.inline_keyboard) == 5  # tz, wake, sleep, smoking_profile, back
 
 
 class TestTexts:
@@ -266,13 +266,18 @@ class TestThrottleMiddleware:
 class TestMenuKeyboard:
     def test_main_menu_keyboard_structure(self) -> None:
         kb = main_menu_keyboard(has_course=True)
-        assert len(kb.inline_keyboard) == 4
+        assert len(kb.inline_keyboard) == 7
         all_texts = [b.text for row in kb.inline_keyboard for b in row]
         assert any("таблетку" in t.lower() for t in all_texts)
         assert any("Прогресс" in t for t in all_texts)
         assert any("Расписание" in t for t in all_texts)
         assert any("Настройки" in t for t in all_texts)
         assert any("Помощь" in t for t in all_texts)
+        assert any("SOS" in t or "закурить" in t.lower() for t in all_texts)
+        assert any("Экономия" in t for t in all_texts)
+        assert any("Здоровье" in t for t in all_texts)
+        assert any("Достижения" in t for t in all_texts)
+        assert any("Настроение" in t for t in all_texts)
 
     def test_menu_callback(self) -> None:
         cb = MenuCallback(action="take_dose")

@@ -14,12 +14,17 @@ class CourseCallback(CallbackData, prefix="course"):
 
 
 class SettingsCallback(CallbackData, prefix="settings"):
-    action: str  # "timezone", "wake_time", "sleep_time"
+    action: str  # "timezone", "wake_time", "sleep_time", "smoking_profile"
 
 
 class MenuCallback(CallbackData, prefix="menu"):
     action: str  # "take_dose", "progress", "schedule", "settings", "help",
-    #              "start_course", "cancel_course", "back"
+    #              "start_course", "cancel_course", "back",
+    #              "sos", "savings", "health", "achievements", "relapse", "mood_history"
+
+
+class MoodCallback(CallbackData, prefix="mood"):
+    value: str  # "good", "neutral", "bad"
 
 
 POPULAR_TIMEZONES = [
@@ -112,8 +117,35 @@ def settings_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text="🚬 Профиль курильщика",
+                    callback_data=SettingsCallback(action="smoking_profile").pack(),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text="◀️ Назад",
                     callback_data=MenuCallback(action="back").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def mood_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="😊 Хорошо",
+                    callback_data=MoodCallback(value="good").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="😐 Нормально",
+                    callback_data=MoodCallback(value="neutral").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="😟 Плохо",
+                    callback_data=MoodCallback(value="bad").pack(),
                 ),
             ],
         ],
@@ -132,12 +164,42 @@ def main_menu_keyboard(has_course: bool = False) -> InlineKeyboardMarkup:
         ])
         rows.append([
             InlineKeyboardButton(
+                text="🆘 Хочу закурить",
+                callback_data=MenuCallback(action="sos").pack(),
+            ),
+            InlineKeyboardButton(
+                text="🚬 Я закурил",
+                callback_data=MenuCallback(action="relapse").pack(),
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton(
                 text="📊 Прогресс",
                 callback_data=MenuCallback(action="progress").pack(),
             ),
             InlineKeyboardButton(
                 text="🕐 Расписание",
                 callback_data=MenuCallback(action="schedule").pack(),
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton(
+                text="💰 Экономия",
+                callback_data=MenuCallback(action="savings").pack(),
+            ),
+            InlineKeyboardButton(
+                text="🏥 Здоровье",
+                callback_data=MenuCallback(action="health").pack(),
+            ),
+        ])
+        rows.append([
+            InlineKeyboardButton(
+                text="🏆 Достижения",
+                callback_data=MenuCallback(action="achievements").pack(),
+            ),
+            InlineKeyboardButton(
+                text="📝 Настроение",
+                callback_data=MenuCallback(action="mood_history").pack(),
             ),
         ])
         rows.append([

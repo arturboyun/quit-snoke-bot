@@ -132,7 +132,8 @@ class TestStartHandlers:
             await session.commit()
 
         await on_sleep_time(msg, state)
-        state.clear.assert_called_once()
+        # Now transitions to smoking profile step instead of clearing
+        state.set_state.assert_called_once()
         msg.answer.assert_called_once()
 
     async def test_on_sleep_time_invalid(self, mock_session_factory) -> None:

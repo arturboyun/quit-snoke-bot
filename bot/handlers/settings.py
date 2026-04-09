@@ -1,4 +1,4 @@
-"""User settings: timezone, wake/sleep times."""
+"""User settings: timezone, wake/sleep times, smoking profile."""
 
 import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,14 +10,21 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.db.engine import session_factory
 from bot.keyboards.inline import SettingsCallback, main_menu_keyboard, timezone_keyboard
-from bot.services.course import get_active_course, update_user_settings
+from bot.services.course import (
+    get_active_course,
+    save_smoking_profile,
+    update_user_settings,
+)
 from bot.utils.texts import (
+    ask_cigarettes_per_day_text,
+    ask_pack_price_text,
     ask_sleep_time_text,
     ask_timezone_text,
     ask_wake_time_text,
     invalid_time_format_text,
     invalid_timezone_text,
     settings_saved_text,
+    smoking_profile_saved_text,
 )
 
 router = Router()
@@ -27,6 +34,8 @@ class SettingsStates(StatesGroup):
     waiting_timezone = State()
     waiting_wake_time = State()
     waiting_sleep_time = State()
+    waiting_cigarettes_per_day = State()
+    waiting_pack_price = State()
 
 
 @router.callback_query(SettingsCallback.filter(F.action == "timezone"))
@@ -136,6 +145,62 @@ async def on_settings_sleep(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
         settings_saved_text(),
+        reply_markup=main_menu_keyboard(has_course=course is not None),
+        parse_mode="HTML",
+    )
+
+
+# ── Smoking Profile ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(SettingsCallback.filter(F.action == "smoking_profile"))
+async def on_change_smoking_profile(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.message.answer(ask_cigarettes_per_day_text(), parse_mode="HTML")
+    await state.set_state(SettingsStates.waiting_cigarettes_per_day)
+    await callback.answer()
+
+
+@router.message(SettingsStates.waiting_cigarettes_per_day)
+async def on_cigarettes_per_day(message: Message, state: FSMContext) -> None:
+    try:
+        count = int(message.text.strip())
+        if count < 1 or count > 200:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ Отправь число от 1 до 200.", parse_mode="HTML")
+        return
+
+    await state.update_data(cigarettes_per_day=count)
+    await message.answer(ask_pack_price_text(), parse_mode="HTML")
+    await state.set_state(SettingsStates.waiting_pack_price)
+
+
+@router.message(SettingsStates.waiting_pack_price)
+async def on_pack_price(message: Message, state: FSMContext) -> None:
+    try:
+        price = float(message.text.strip().replace(",", "."))
+        if price <= 0 or price > 100000:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ Отправь цену числом, например: <b>150</b>", parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    cigarettes_per_day = data["cigarettes_per_day"]
+
+    async with session_factory() as session:
+        await save_smoking_profile(
+            session,
+            message.from_user.id,
+            cigarettes_per_day=cigarettes_per_day,
+            pack_price=price,
+        )
+        await session.commit()
+        course = await get_active_course(session, message.from_user.id)
+
+    await state.clear()
+    await message.answer(
+        smoking_profile_saved_text(),
         reply_markup=main_menu_keyboard(has_course=course is not None),
         parse_mode="HTML",
     )

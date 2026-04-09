@@ -12,8 +12,15 @@ from aiogram.types import CallbackQuery, Message
 from bot.db.engine import session_factory
 from bot.keyboards.inline import main_menu_keyboard, timezone_keyboard
 from bot.models.user import User
-from bot.services.course import get_active_course, get_or_create_user, update_user_settings
+from bot.services.course import (
+    get_active_course,
+    get_or_create_user,
+    save_smoking_profile,
+    update_user_settings,
+)
 from bot.utils.texts import (
+    ask_cigarettes_per_day_text,
+    ask_pack_price_text,
     ask_sleep_time_text,
     ask_timezone_text,
     ask_wake_time_text,
@@ -30,6 +37,8 @@ class OnboardingStates(StatesGroup):
     waiting_timezone = State()
     waiting_wake_time = State()
     waiting_sleep_time = State()
+    waiting_cigarettes_per_day = State()
+    waiting_pack_price = State()
 
 
 @router.message(CommandStart())
@@ -124,6 +133,47 @@ async def on_sleep_time(message: Message, state: FSMContext) -> None:
             timezone=tz_name,
             wake_time=wake_time,
             sleep_time=t,
+        )
+        await session.commit()
+
+    await state.update_data(sleep_time=t.isoformat())
+    await message.answer(ask_cigarettes_per_day_text(), parse_mode="HTML")
+    await state.set_state(OnboardingStates.waiting_cigarettes_per_day)
+
+
+@router.message(OnboardingStates.waiting_cigarettes_per_day)
+async def on_onboard_cigarettes(message: Message, state: FSMContext) -> None:
+    try:
+        count = int(message.text.strip())
+        if count < 1 or count > 200:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ Отправь число от 1 до 200.", parse_mode="HTML")
+        return
+
+    await state.update_data(cigarettes_per_day=count)
+    await message.answer(ask_pack_price_text(), parse_mode="HTML")
+    await state.set_state(OnboardingStates.waiting_pack_price)
+
+
+@router.message(OnboardingStates.waiting_pack_price)
+async def on_onboard_pack_price(message: Message, state: FSMContext) -> None:
+    try:
+        price = float(message.text.strip().replace(",", "."))
+        if price <= 0 or price > 100000:
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("❌ Отправь цену числом, например: <b>150</b>", parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+
+    async with session_factory() as session:
+        await save_smoking_profile(
+            session,
+            message.from_user.id,
+            cigarettes_per_day=data["cigarettes_per_day"],
+            pack_price=price,
         )
         await session.commit()
 

@@ -152,13 +152,22 @@ def menu_text(day: int | None = None, phase: int | None = None) -> str:
 
 
 def today_schedule_text(
-    day: int, phase: int, times: list[str], target: int | str, taken: int = 0,
+    day: int,
+    phase: int,
+    times: list[str],
+    target: int | str,
+    taken: int = 0,
+    now_time: str | None = None,
 ) -> str:
     lines = []
     for i, t in enumerate(times):
         if i < taken:
             lines.append(f"  ✅ <s>{t}</s>")
-        elif i == taken:
+        elif now_time and t < now_time:
+            lines.append(f"  ⏭️ {t} — пропущен")
+        elif i == taken and (not now_time or t >= now_time):
+            lines.append(f"  👉 <b>{t}</b> — следующий")
+        elif not lines or all("👉" not in ln and "следующий" not in ln for ln in lines):
             lines.append(f"  👉 <b>{t}</b> — следующий")
         else:
             lines.append(f"  ⏳ {t}")

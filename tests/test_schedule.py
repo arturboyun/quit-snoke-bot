@@ -505,10 +505,30 @@ class TestBuildAdaptiveSchedule:
 
         return ZoneInfo(TZ)
 
-    def test_no_doses_taken_projects_from_now(self) -> None:
-        """With no doses taken, all slots projected from now."""
+    def test_no_doses_taken_projects_from_wake(self) -> None:
+        """With no doses taken and no course_start_dt, slots anchor to wake_time."""
         tz = self._tz()
-        now = datetime.datetime(2025, 1, 1, 9, 0, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 1, 12, 0, tzinfo=tz)
+        wake = datetime.time(7, 0)
+        slots = build_adaptive_schedule(
+            day=1,
+            sleep_time=datetime.time(23, 0),
+            wake_time=wake,
+            timezone=TZ,
+            taken_times=[],
+            now=now,
+        )
+        assert all(not s.taken for s in slots)
+        assert len(slots) == 6  # Phase 1: full 6 tablets from wake
+        wake_dt = datetime.datetime(2025, 1, 1, 7, 0, tzinfo=tz)
+        assert slots[0].time == wake_dt
+        assert slots[1].time == wake_dt + datetime.timedelta(hours=2)
+
+    def test_no_doses_day1_with_course_start(self) -> None:
+        """Day 1 with course_start_dt anchors schedule to course start."""
+        tz = self._tz()
+        course_start = datetime.datetime(2025, 1, 1, 14, 0, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 1, 14, 5, tzinfo=tz)
         slots = build_adaptive_schedule(
             day=1,
             sleep_time=datetime.time(23, 0),
@@ -516,11 +536,32 @@ class TestBuildAdaptiveSchedule:
             timezone=TZ,
             taken_times=[],
             now=now,
+            course_start_dt=course_start,
         )
         assert all(not s.taken for s in slots)
-        assert len(slots) == 6  # Phase 1: 6 tablets
-        assert slots[0].time == now
-        assert slots[1].time == now + datetime.timedelta(hours=2)
+        # First slot is at course start (14:00), not now (14:05) or wake (07:00)
+        assert slots[0].time == course_start
+        assert slots[1].time == course_start + datetime.timedelta(hours=2)
+
+    def test_no_doses_day2_ignores_course_start(self) -> None:
+        """Day 2+ always anchors to wake_time, not course start."""
+        tz = self._tz()
+        course_start = datetime.datetime(2025, 1, 1, 14, 0, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 2, 8, 0, tzinfo=tz)
+        wake = datetime.time(7, 0)
+        slots = build_adaptive_schedule(
+            day=2,
+            sleep_time=datetime.time(23, 0),
+            wake_time=wake,
+            timezone=TZ,
+            taken_times=[],
+            now=now,
+            course_start_dt=course_start,
+        )
+        wake_dt = datetime.datetime(2025, 1, 2, 7, 0, tzinfo=tz)
+        # Full schedule from wake_time
+        assert slots[0].time == wake_dt
+        assert slots[1].time - slots[0].time == datetime.timedelta(hours=2)
 
     def test_taken_doses_appear_at_actual_times(self) -> None:
         """Taken doses show at real times, remaining projected from last."""

@@ -158,12 +158,19 @@ def build_adaptive_schedule(
     timezone: str,
     taken_times: list[datetime.datetime],
     now: datetime.datetime | None = None,
+    *,
+    course_start_dt: datetime.datetime | None = None,
 ) -> list[AdaptiveSlot]:
     """Build a schedule that reflects actual intake + projected future doses.
 
     ``taken_times`` — sorted list of actual ``taken_at`` datetimes for today.
     The remaining doses are projected from the last actual intake using the
     phase interval, up to ``target_tablets``.
+
+    ``course_start_dt`` — when the course was created.  On Day 1, if the
+    course was started after ``wake_time``, the schedule anchors to the
+    course start moment instead of ``now``, giving a stable display.
+    On Day 2+ the schedule always anchors to ``wake_time``.
     """
     phase = get_phase(day)
     tz = ZoneInfo(timezone)
@@ -184,13 +191,21 @@ def build_adaptive_schedule(
         t_local = t.astimezone(tz) if t.tzinfo else t.replace(tzinfo=tz)
         slots.append(AdaptiveSlot(time=t_local, taken=True))
 
-    # 2. Project remaining doses from the last intake (or now if none taken)
+    # 2. Project remaining doses
     remaining = phase.target_tablets - len(slots)
     if remaining > 0:
         if slots:
+            # After taken doses — project from last intake
             next_dt = slots[-1].time + interval
         else:
-            next_dt = now
+            # No doses taken yet — pick a stable anchor:
+            #   Day 1: course_start_dt (mid-day start) or wake_time
+            #   Day 2+: wake_time
+            if day == 1 and course_start_dt is not None:
+                anchor = course_start_dt.astimezone(tz)
+                next_dt = max(anchor, wake_dt)
+            else:
+                next_dt = wake_dt
 
         for _ in range(remaining):
             if next_dt >= sleep_dt:

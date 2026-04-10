@@ -176,12 +176,15 @@ async def schedule_getter(dialog_manager: DialogManager, **kwargs) -> dict:
         timezone=ctx["user"].timezone,
         taken_times=taken_times,
         now=now,
+        course_start_dt=ctx["course"].created_at,
     )
     times = [s.time.strftime("%H:%M") for s in slots]
     taken = sum(1 for s in slots if s.taken)
+    now_time = now.strftime("%H:%M")
     return {
         "text": today_schedule_text(
             ctx["day"], phase_info.phase, times, phase_info.target_display, taken,
+            now_time=now_time,
         ),
     }
 

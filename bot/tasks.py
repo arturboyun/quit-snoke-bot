@@ -18,7 +18,6 @@ from bot.services.course import (
 )
 from bot.services.schedule import (
     QUIT_DAY,
-    calculate_dose_times,
     get_course_day,
     get_phase,
     get_progress,
@@ -109,14 +108,11 @@ async def send_dose_followup(
 
 @broker.task
 async def schedule_daily_doses(user_id: int) -> None:
-    """Calculate and schedule all dose reminders for the current day.
+    """Daily housekeeping: missed-dose logging, phase/quit-day notifications,
+    morning check-in, fallback auto-start, and progress summary.
 
-    This task runs once daily (early morning). It also handles:
-    - Logging missed doses from the previous day
-    - Phase change notification
-    - Quit-day notification on day 5
-    - Course completion on day 26
-    - Progress summary scheduling
+    Individual dose reminders are NOT scheduled here — they are managed
+    by the chain-based ``schedule_next_dose`` / ``handle_dose_timeout`` loop.
     """
     async with session_factory() as session:
         course = await get_active_course(session, user_id)
@@ -199,15 +195,6 @@ async def schedule_daily_doses(user_id: int) -> None:
             finally:
                 await bot.session.close()
 
-        # Calculate dose times and schedule each as a separate task
-        slots = calculate_dose_times(
-            day=day,
-            wake_time=user.wake_time,
-            sleep_time=user.sleep_time,
-            course_start_date=course.start_date,
-            timezone=user.timezone,
-        )
-
         now = datetime.datetime.now(tz)
 
         # Schedule morning check-in (5 min after wake time)
@@ -223,31 +210,17 @@ async def schedule_daily_doses(user_id: int) -> None:
                 user_id,
             )
 
-        for dose_index, slot in enumerate(slots):
-            if slot.time <= now:
-                continue
-            # dose_number = 1-indexed position in today's full schedule
-            dose_number = dose_index + 1
-            await send_dose_reminder.schedule_by_time(
+        # Fallback: auto-start dose chain if user doesn't click "Проснулся"
+        fallback_dt = datetime.datetime.combine(
+            today,
+            user.wake_time,
+            tzinfo=tz,
+        ) + datetime.timedelta(hours=2)
+        if fallback_dt > now:
+            await auto_start_doses.schedule_by_time(
                 schedule_source,
-                slot.time,
+                fallback_dt,
                 user_id,
-                course.id,
-                slot.day,
-                slot.phase,
-            )
-            # Schedule a follow-up nudge if dose is not confirmed
-            followup_time = slot.time + datetime.timedelta(
-                minutes=FOLLOWUP_DELAY_MINUTES,
-            )
-            await send_dose_followup.schedule_by_time(
-                schedule_source,
-                followup_time,
-                user_id,
-                course.id,
-                slot.day,
-                slot.phase,
-                dose_number,
             )
 
         # Schedule progress summary near end of day (15 min before sleep)
@@ -355,7 +328,7 @@ async def send_progress_summary(user_id: int) -> None:
 
 @broker.task
 async def send_morning_checkin(user_id: int) -> None:
-    """Send morning check-in with mood buttons."""
+    """Send morning check-in with wake-up button and mood selection."""
     async with session_factory() as session:
         course = await get_active_course(session, user_id)
         if not course:
@@ -374,16 +347,171 @@ async def send_morning_checkin(user_id: int) -> None:
         if day < 1 or day > 25:
             return
 
-    from bot.keyboards.inline import mood_keyboard
+    from bot.keyboards.inline import morning_checkin_keyboard
 
     bot = Bot(token=settings.token)
     try:
         await bot.send_message(
             user_id,
             morning_checkin_text(day),
-            reply_markup=mood_keyboard(),
+            reply_markup=morning_checkin_keyboard(),
         )
     except Exception:
         logger.exception("Failed to send morning check-in to user %d", user_id)
     finally:
         await bot.session.close()
+
+
+@broker.task
+async def schedule_next_dose(user_id: int) -> None:
+    """Schedule the next dose reminder in the adaptive chain.
+
+    Determines the next dose time based on when the last dose was actually
+    taken (not a fixed schedule).  Sends the reminder immediately if the
+    time has already arrived, or schedules it for the future.  Also queues
+    a follow-up nudge and a timeout handler to advance the chain if the
+    user doesn't confirm.
+    """
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+        if not course:
+            return
+
+        user = course.user
+        if user is None:
+            user = await get_or_create_user(session, user_id)
+
+        tz = ZoneInfo(user.timezone)
+        now = datetime.datetime.now(tz)
+        today = now.date()
+        day = get_course_day(course.start_date, today)
+
+        if day < 1 or day > 25:
+            return
+
+        phase_info = get_phase(day)
+
+        from bot.services.course import get_doses_taken_today, get_last_dose_time
+
+        taken = await get_doses_taken_today(session, course.id, today)
+
+        if taken >= phase_info.target_tablets:
+            return  # All doses taken for today
+
+        # Sleep boundary
+        sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
+        if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
+            sleep_dt += datetime.timedelta(days=1)
+
+        # Determine next dose time from last actual intake
+        last_time = await get_last_dose_time(session, course.id, day)
+
+        if last_time is not None:
+            last_aware = last_time if last_time.tzinfo else last_time.replace(tzinfo=datetime.UTC)
+            next_dt = last_aware.astimezone(tz) + datetime.timedelta(
+                minutes=phase_info.interval_minutes,
+            )
+        else:
+            next_dt = now  # First dose of the day — send immediately
+
+        if next_dt >= sleep_dt:
+            return  # Past sleep time
+
+        dose_number = taken + 1
+
+        if next_dt <= now:
+            # Send immediately
+            await send_dose_reminder.kiq(user_id, course.id, day, phase_info.phase)
+        else:
+            await send_dose_reminder.schedule_by_time(
+                schedule_source,
+                next_dt,
+                user_id,
+                course.id,
+                day,
+                phase_info.phase,
+            )
+
+        # Follow-up nudge
+        reminder_dt = max(next_dt, now)
+        followup_dt = reminder_dt + datetime.timedelta(minutes=FOLLOWUP_DELAY_MINUTES)
+        if followup_dt < sleep_dt:
+            await send_dose_followup.schedule_by_time(
+                schedule_source,
+                followup_dt,
+                user_id,
+                course.id,
+                day,
+                phase_info.phase,
+                dose_number,
+            )
+
+        # Timeout: advance chain if dose not confirmed within one interval
+        timeout_dt = reminder_dt + datetime.timedelta(minutes=phase_info.interval_minutes)
+        if timeout_dt < sleep_dt:
+            await handle_dose_timeout.schedule_by_time(
+                schedule_source,
+                timeout_dt,
+                user_id,
+                dose_number,
+            )
+
+
+@broker.task
+async def handle_dose_timeout(user_id: int, expected_taken: int) -> None:
+    """Advance the dose chain when a reminder goes unconfirmed.
+
+    Fires one interval after the last reminder.  If the user already
+    confirmed the dose the task is stale and exits.  Otherwise it
+    kicks ``schedule_next_dose`` which sends a new reminder immediately
+    and schedules the next timeout — effectively reminding the user
+    every *interval* until they respond or sleep time arrives.
+    """
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+        if not course:
+            return
+
+        user = course.user
+        if user is None:
+            user = await get_or_create_user(session, user_id)
+
+        tz = ZoneInfo(user.timezone)
+        today = datetime.datetime.now(tz).date()
+
+        from bot.services.course import get_doses_taken_today
+
+        taken = await get_doses_taken_today(session, course.id, today)
+
+    if taken >= expected_taken:
+        return  # Dose was confirmed, chain already advanced
+
+    # Dose was missed — advance chain (sends a new reminder)
+    await schedule_next_dose.kiq(user_id)
+
+
+@broker.task
+async def auto_start_doses(user_id: int) -> None:
+    """Fallback: start the dose chain if user didn't click 'Проснулся'.
+
+    Scheduled at wake_time + 2 hours.  If no doses have been taken yet
+    today the chain is kicked off automatically.
+    """
+    async with session_factory() as session:
+        course = await get_active_course(session, user_id)
+        if not course:
+            return
+
+        user = course.user
+        if user is None:
+            user = await get_or_create_user(session, user_id)
+
+        tz = ZoneInfo(user.timezone)
+        today = datetime.datetime.now(tz).date()
+
+        from bot.services.course import get_doses_taken_today
+
+        taken = await get_doses_taken_today(session, course.id, today)
+
+    if taken == 0:
+        await schedule_next_dose.kiq(user_id)

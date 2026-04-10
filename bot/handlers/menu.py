@@ -42,11 +42,11 @@ from bot.services.course import (
 from bot.services.schedule import (
     QUIT_DAY,
     calculate_dose_times,
-    calculate_remaining_doses_today,
     get_course_day,
     get_phase,
     get_progress,
 )
+from bot.tasks import schedule_next_dose
 from bot.utils.texts import (
     achievements_text,
     already_has_course_text,
@@ -232,16 +232,12 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
         )
         await session.commit()
 
-    # Calculate next dose time
-    remaining = calculate_remaining_doses_today(
-        day=day,
-        wake_time=user.wake_time,
-        sleep_time=user.sleep_time,
-        course_start_date=course.start_date,
-        timezone=user.timezone,
-        now=now,
-    )
-    next_time = remaining[0].time.strftime("%H:%M") if remaining else None
+    # Calculate next dose time adaptively from actual intake
+    next_dt = now + datetime.timedelta(minutes=phase_info.interval_minutes)
+    sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
+    if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
+        sleep_dt += datetime.timedelta(days=1)
+    next_time = next_dt.strftime("%H:%M") if next_dt < sleep_dt else None
 
     text = dose_taken_text(taken, phase_info.target_display, next_time)
     for key in newly_earned:
@@ -254,6 +250,9 @@ async def on_menu_take_dose(callback: CallbackQuery) -> None:
         text,
         reply_markup=main_menu_keyboard(has_course=True),
     )
+
+    # Advance the adaptive dose chain
+    await schedule_next_dose.kiq(callback.from_user.id)
     await callback.answer("✅ Отмечено!")
 
 
@@ -320,6 +319,7 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
         sleep_time=user.sleep_time,
         course_start_date=course.start_date,
         timezone=user.timezone,
+        first_dose_at=course.created_at,
     )
     times = [s.time.strftime("%H:%M") for s in slots]
 
@@ -382,8 +382,10 @@ async def on_menu_sos(callback: CallbackQuery) -> None:
             # Show hours since last relapse for motivation
             last_relapse = await get_last_relapse_time(session, callback.from_user.id)
             if last_relapse is not None:
-                lr = last_relapse if last_relapse.tzinfo else last_relapse.replace(
-                    tzinfo=datetime.UTC
+                lr = (
+                    last_relapse
+                    if last_relapse.tzinfo
+                    else last_relapse.replace(tzinfo=datetime.UTC)
                 )
                 hours_since_last_smoke = max(
                     0.0,
@@ -503,8 +505,7 @@ async def on_menu_health(callback: CallbackQuery) -> None:
         # If user relapsed, health recovery resets from last relapse
         if last_relapse is not None:
             last_relapse_aware = (
-                last_relapse if last_relapse.tzinfo
-                else last_relapse.replace(tzinfo=datetime.UTC)
+                last_relapse if last_relapse.tzinfo else last_relapse.replace(tzinfo=datetime.UTC)
             )
             smoke_free_since = max(quit_dt, last_relapse_aware.astimezone(tz))
         else:
@@ -527,9 +528,7 @@ async def on_menu_achievements(callback: CallbackQuery) -> None:
     async with session_factory() as session:
         user = await get_or_create_user(session, callback.from_user.id)
         earned = await get_user_achievements(session, callback.from_user.id)
-        await check_and_grant_achievements(
-            session, callback.from_user.id, timezone=user.timezone
-        )
+        await check_and_grant_achievements(session, callback.from_user.id, timezone=user.timezone)
         earned = await get_user_achievements(session, callback.from_user.id)
         await session.commit()
 

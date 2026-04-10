@@ -157,13 +157,16 @@ class TestCourseHandlers:
             patch("bot.handlers.course.schedule_source") as mock_ss,
             patch("bot.handlers.course.schedule_daily_doses") as mock_sdd,
             patch("bot.handlers.course.schedule_next_day") as mock_snd,
+            patch("bot.handlers.course.schedule_next_dose") as mock_snd2,
         ):
             mock_ss.startup = AsyncMock()
             mock_sdd.kiq = AsyncMock()
             mock_snd.kiq = AsyncMock()
+            mock_snd2.kiq = AsyncMock()
             self.mock_schedule_source = mock_ss
             self.mock_schedule_daily = mock_sdd
             self.mock_schedule_next = mock_snd
+            self.mock_schedule_next_dose = mock_snd2
             yield
 
     async def test_start_course_no_active(self, mock_session_factory) -> None:
@@ -474,8 +477,11 @@ class TestMenuHandlers:
         cb.answer.assert_called_once()
         assert "Нет активного курса" in cb.answer.call_args[0][0]
 
+    @patch("bot.handlers.menu.schedule_next_dose")
     @patch("bot.handlers.menu.datetime")
-    async def test_on_menu_take_dose_success(self, mock_dt, mock_session_factory) -> None:
+    async def test_on_menu_take_dose_success(
+        self, mock_dt, mock_snd, mock_session_factory
+    ) -> None:
         from bot.handlers.menu import on_menu_take_dose
 
         # Fix time to midday so waking-hours check passes
@@ -486,6 +492,8 @@ class TestMenuHandlers:
         mock_dt.datetime.combine = datetime.datetime.combine
         mock_dt.timedelta = datetime.timedelta
 
+        mock_snd.kiq = AsyncMock()
+
         cb = _make_callback(user_id=501)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 501)
@@ -495,6 +503,7 @@ class TestMenuHandlers:
         await on_menu_take_dose(cb)
         cb.message.edit_text.assert_called_once()
         assert "Отмечено" in cb.answer.call_args[0][0]
+        mock_snd.kiq.assert_called_once()
 
     async def test_on_menu_take_dose_course_ended(self, mock_session_factory) -> None:
         from bot.handlers.menu import on_menu_take_dose

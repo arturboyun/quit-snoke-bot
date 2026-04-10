@@ -27,6 +27,10 @@ class MoodCallback(CallbackData, prefix="mood"):
     value: str  # "good", "neutral", "bad"
 
 
+class WakeCallback(CallbackData, prefix="wake"):
+    action: str  # "confirmed"
+
+
 POPULAR_TIMEZONES = [
     "Europe/Kyiv",
     "Europe/Minsk",
@@ -157,6 +161,33 @@ def settings_keyboard() -> InlineKeyboardMarkup:
 def mood_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="😊 Хорошо",
+                    callback_data=MoodCallback(value="good").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="😐 Нормально",
+                    callback_data=MoodCallback(value="neutral").pack(),
+                ),
+                InlineKeyboardButton(
+                    text="😟 Плохо",
+                    callback_data=MoodCallback(value="bad").pack(),
+                ),
+            ],
+        ],
+    )
+
+
+def morning_checkin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="☀️ Проснулся — начать приём",
+                    callback_data=WakeCallback(action="confirmed").pack(),
+                ),
+            ],
             [
                 InlineKeyboardButton(
                     text="😊 Хорошо",

@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 
 # Phase definitions: (start_day, end_day, interval_minutes, target_tablets, min_tablets)
 PHASES: list[tuple[int, int, int, int, int]] = [
-    (1, 3, 120, 6, 6),    # Phase 1: days 1–3, every 2h, 6 tablets/day
-    (4, 12, 150, 5, 5),   # Phase 2: days 4–12, every 2.5h, 5 tablets/day
+    (1, 3, 120, 6, 6),  # Phase 1: days 1–3, every 2h, 6 tablets/day
+    (4, 12, 150, 5, 5),  # Phase 2: days 4–12, every 2.5h, 5 tablets/day
     (13, 16, 180, 4, 4),  # Phase 3: days 13–16, every 3h, 4 tablets/day
     (17, 20, 300, 3, 3),  # Phase 4: days 17–20, every 5h, 3 tablets/day
     (21, 25, 300, 2, 1),  # Phase 5: days 21–25, every 5h, 1–2 tablets/day
@@ -80,11 +80,17 @@ def calculate_dose_times(
     sleep_time: datetime.time,
     course_start_date: datetime.date,
     timezone: str,
+    *,
+    first_dose_at: datetime.datetime | None = None,
 ) -> list[DoseSlot]:
     """Calculate dose times for a specific course day.
 
-    Doses start at wake_time, spaced by the phase interval,
-    and stop before sleep_time.
+    Doses start at wake_time (or ``first_dose_at`` when it falls after
+    wake_time), spaced by the phase interval, and stop before sleep_time.
+
+    ``first_dose_at`` is used for adaptive scheduling when the course is
+    started mid-day — the first dose shifts to the actual start moment
+    instead of the configured wake_time.
     """
     phase = get_phase(day)
     tz = ZoneInfo(timezone)
@@ -97,9 +103,16 @@ def calculate_dose_times(
     if sleep_dt <= wake_dt:
         sleep_dt += datetime.timedelta(days=1)
 
+    # Adaptive start: if first_dose_at is after wake_dt, shift schedule forward
+    start_dt = wake_dt
+    if first_dose_at is not None:
+        first_dose_aware = first_dose_at.astimezone(tz)
+        if first_dose_aware > wake_dt:
+            start_dt = first_dose_aware
+
     interval = datetime.timedelta(minutes=phase.interval_minutes)
     slots: list[DoseSlot] = []
-    current = wake_dt
+    current = start_dt
 
     while current < sleep_dt and len(slots) < phase.target_tablets:
         slots.append(DoseSlot(time=current, day=day, phase=phase.phase))
@@ -115,9 +128,18 @@ def calculate_remaining_doses_today(
     course_start_date: datetime.date,
     timezone: str,
     now: datetime.datetime | None = None,
+    *,
+    first_dose_at: datetime.datetime | None = None,
 ) -> list[DoseSlot]:
     """Return only future dose slots for today (after `now`)."""
-    all_slots = calculate_dose_times(day, wake_time, sleep_time, course_start_date, timezone)
+    all_slots = calculate_dose_times(
+        day,
+        wake_time,
+        sleep_time,
+        course_start_date,
+        timezone,
+        first_dose_at=first_dose_at,
+    )
     if now is None:
         now = datetime.datetime.now(ZoneInfo(timezone))
     return [s for s in all_slots if s.time > now]

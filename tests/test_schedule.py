@@ -272,6 +272,90 @@ class TestCalculateDoseTimes:
         assert len(slots) > 0
         assert all(s.time.tzinfo is not None for s in slots)
 
+    def test_first_dose_at_shifts_schedule(
+        self, course_start_date: datetime.date, timezone: str
+    ) -> None:
+        """Mid-day start: first_dose_at after wake_time shifts doses forward."""
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(timezone)
+        # Wake at 08:00 but course started at 12:30 — Phase 1, 2h interval
+        first_dose = datetime.datetime(2026, 1, 1, 12, 30, tzinfo=tz)
+        slots = calculate_dose_times(
+            1,
+            datetime.time(8, 0),
+            datetime.time(22, 0),
+            course_start_date,
+            timezone,
+            first_dose_at=first_dose,
+        )
+        # First dose at 12:30, then 14:30, 16:30, 18:30, 20:30 — 5 fit before 22:00
+        assert slots[0].time == first_dose
+        assert len(slots) == 5
+        for i in range(1, len(slots)):
+            delta = slots[i].time - slots[i - 1].time
+            assert delta == datetime.timedelta(hours=2)
+
+    def test_first_dose_at_before_wake_uses_wake(
+        self, course_start_date: datetime.date, timezone: str
+    ) -> None:
+        """first_dose_at before wake_time is ignored — wake_time wins."""
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(timezone)
+        first_dose = datetime.datetime(2026, 1, 1, 6, 0, tzinfo=tz)
+        slots = calculate_dose_times(
+            1,
+            datetime.time(8, 0),
+            datetime.time(22, 0),
+            course_start_date,
+            timezone,
+            first_dose_at=first_dose,
+        )
+        assert slots[0].time.hour == 8
+        assert slots[0].time.minute == 0
+        assert len(slots) == 6  # Normal full schedule
+
+    def test_first_dose_at_day2_no_effect(
+        self, course_start_date: datetime.date, timezone: str
+    ) -> None:
+        """On day 2, a day-1 created_at has no effect (it's in the past)."""
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(timezone)
+        # Course created on day 1 at 12:30; day 2 should be normal
+        first_dose = datetime.datetime(2026, 1, 1, 12, 30, tzinfo=tz)
+        slots = calculate_dose_times(
+            2,
+            datetime.time(8, 0),
+            datetime.time(22, 0),
+            course_start_date,
+            timezone,
+            first_dose_at=first_dose,
+        )
+        assert slots[0].time.hour == 8
+        assert slots[0].time.minute == 0
+        assert len(slots) == 6
+
+    def test_first_dose_at_late_evening_few_doses(
+        self, course_start_date: datetime.date, timezone: str
+    ) -> None:
+        """Course started very late — only 1 dose fits before sleep."""
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(timezone)
+        first_dose = datetime.datetime(2026, 1, 1, 21, 0, tzinfo=tz)
+        slots = calculate_dose_times(
+            1,
+            datetime.time(8, 0),
+            datetime.time(22, 0),
+            course_start_date,
+            timezone,
+            first_dose_at=first_dose,
+        )
+        assert len(slots) == 1
+        assert slots[0].time == first_dose
+
 
 class TestCalculateRemainingDosesToday:
     def test_returns_only_future_doses(

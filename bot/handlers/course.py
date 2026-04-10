@@ -10,7 +10,9 @@ from bot.db.engine import session_factory
 from bot.keyboards.inline import (
     CourseCallback,
     DoseCallback,
+    WakeCallback,
     main_menu_keyboard,
+    mood_keyboard,
 )
 from bot.models.course import CourseStatus
 from bot.services.course import (
@@ -22,9 +24,9 @@ from bot.services.course import (
     log_dose,
     start_course,
 )
-from bot.services.schedule import calculate_remaining_doses_today, get_phase
+from bot.services.schedule import get_phase
 from bot.taskiq_broker import schedule_source
-from bot.tasks import schedule_daily_doses, schedule_next_day
+from bot.tasks import schedule_daily_doses, schedule_next_day, schedule_next_dose
 from bot.utils.texts import (
     course_cancelled_text,
     course_started_text,
@@ -58,6 +60,7 @@ async def on_confirm_start(callback: CallbackQuery) -> None:
 
     await schedule_source.startup()
     await schedule_daily_doses.kiq(callback.from_user.id)
+    await schedule_next_dose.kiq(callback.from_user.id)  # Start dose chain immediately
     await schedule_next_day.kiq(callback.from_user.id)
     await callback.answer()
 
@@ -87,6 +90,25 @@ async def on_confirm_cancel(callback: CallbackQuery) -> None:
         reply_markup=main_menu_keyboard(has_course=False),
     )
     await callback.answer()
+
+
+@router.callback_query(WakeCallback.filter(F.action == "confirmed"))
+async def on_wake_confirmed(callback: CallbackQuery) -> None:
+    async with session_factory() as session:
+        course = await get_active_course(session, callback.from_user.id)
+        if not course:
+            await callback.answer("Нет активного курса", show_alert=True)
+            return
+
+    # Start dose chain
+    await schedule_next_dose.kiq(callback.from_user.id)
+
+    # Remove wake button, keep only mood buttons
+    try:
+        await callback.message.edit_reply_markup(reply_markup=mood_keyboard())
+    except Exception:
+        pass
+    await callback.answer("💊 Расписание приёма запущено!")
 
 
 @router.callback_query(DoseCallback.filter(F.action == "taken"))
@@ -161,24 +183,21 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
         )
 
         taken = await get_doses_taken_today(session, active.id, today)
-        await check_and_grant_achievements(
-            session, callback.from_user.id, timezone=user.timezone
-        )
+        await check_and_grant_achievements(session, callback.from_user.id, timezone=user.timezone)
         await session.commit()
 
-    # Calculate next dose time
-    remaining = calculate_remaining_doses_today(
-        day=callback_data.day,
-        wake_time=user.wake_time,
-        sleep_time=user.sleep_time,
-        course_start_date=active.start_date,
-        timezone=user.timezone,
-        now=now,
-    )
-    next_time = remaining[0].time.strftime("%H:%M") if remaining else None
+    # Calculate next dose time adaptively from actual intake
+    next_dt = now + datetime.timedelta(minutes=phase_info.interval_minutes)
+    sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
+    if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
+        sleep_dt += datetime.timedelta(days=1)
+    next_time = next_dt.strftime("%H:%M") if next_dt < sleep_dt else None
 
     await callback.message.edit_text(
         dose_taken_text(taken, phase_info.target_display, next_time),
         parse_mode="HTML",
     )
+
+    # Advance the adaptive dose chain
+    await schedule_next_dose.kiq(callback.from_user.id)
     await callback.answer("✅ Отмечено!")

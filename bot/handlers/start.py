@@ -162,7 +162,9 @@ async def on_onboard_cigarettes(message: Message, state: FSMContext) -> None:
 
 
 @router.message(OnboardingStates.waiting_pack_price)
-async def on_onboard_pack_price(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_onboard_pack_price(
+    message: Message, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     try:
         price = float(message.text.strip().replace(",", "."))
         if price <= 0 or price > 100000:

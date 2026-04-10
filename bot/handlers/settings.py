@@ -68,7 +68,9 @@ async def on_change_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(SettingsStates.waiting_timezone)
-async def on_settings_timezone(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_settings_timezone(
+    message: Message, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     if not message.text:
         await message.answer(invalid_timezone_text(), parse_mode="HTML")
         return
@@ -96,7 +98,9 @@ async def on_settings_timezone(message: Message, state: FSMContext, dialog_manag
 
 
 @router.callback_query(SettingsStates.waiting_timezone, F.data.startswith("tz:"))
-async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_settings_timezone_button(
+    callback: CallbackQuery, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     tz_name = callback.data.split(":", 1)[1]
     try:
         ZoneInfo(tz_name)
@@ -125,7 +129,9 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
 
 
 @router.message(SettingsStates.waiting_wake_time)
-async def on_settings_wake(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_settings_wake(
+    message: Message, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     if not message.text:
         await message.answer(invalid_time_format_text(), parse_mode="HTML")
         return
@@ -152,7 +158,9 @@ async def on_settings_wake(message: Message, state: FSMContext, dialog_manager: 
 
 
 @router.message(SettingsStates.waiting_sleep_time)
-async def on_settings_sleep(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_settings_sleep(
+    message: Message, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     if not message.text:
         await message.answer(invalid_time_format_text(), parse_mode="HTML")
         return
@@ -204,7 +212,9 @@ async def on_cigarettes_per_day(message: Message, state: FSMContext) -> None:
 
 
 @router.message(SettingsStates.waiting_pack_price)
-async def on_pack_price(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+async def on_pack_price(
+    message: Message, state: FSMContext, dialog_manager: DialogManager,
+) -> None:
     try:
         price = float(message.text.strip().replace(",", "."))
         if price <= 0 or price > 100000:

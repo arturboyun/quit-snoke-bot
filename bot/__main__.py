@@ -56,10 +56,14 @@ async def main() -> None:
 
     # Handle stale dialog buttons after bot restart
     async def on_unknown_intent(event, dialog_manager):
-        await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND)
+        await dialog_manager.start(
+            MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND,
+        )
 
     async def on_unknown_state(event, dialog_manager):
-        await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND)
+        await dialog_manager.start(
+            MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND,
+        )
 
     dp.errors.register(on_unknown_intent, ExceptionTypeFilter(UnknownIntent))
     dp.errors.register(on_unknown_state, ExceptionTypeFilter(UnknownState))

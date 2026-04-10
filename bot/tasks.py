@@ -52,16 +52,6 @@ async def send_dose_reminder(user_id: int, course_id: int, day: int, phase: int)
                 return
 
             user = await get_or_create_user(session, user_id)
-            tz = ZoneInfo(user.timezone)
-            now_time = datetime.datetime.now(tz).time()
-
-            # Validate reminder is still within waking hours (settings may have changed)
-            if user.sleep_time > user.wake_time:
-                if now_time < user.wake_time or now_time >= user.sleep_time:
-                    return
-            else:
-                if user.sleep_time <= now_time < user.wake_time:
-                    return
 
         phase_info = get_phase(day)
         text = dose_reminder_text(day, phase, phase_info.target_display)
@@ -398,11 +388,6 @@ async def schedule_next_dose(user_id: int) -> None:
         if taken >= phase_info.target_tablets:
             return  # All doses taken for today
 
-        # Sleep boundary
-        sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
-        if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
-            sleep_dt += datetime.timedelta(days=1)
-
         # Determine next dose time from last actual intake
         last_time = await get_last_dose_time(session, course.id, day)
 
@@ -413,9 +398,6 @@ async def schedule_next_dose(user_id: int) -> None:
             )
         else:
             next_dt = now  # First dose of the day — send immediately
-
-        if next_dt >= sleep_dt:
-            return  # Past sleep time
 
         dose_number = taken + 1
 
@@ -435,26 +417,24 @@ async def schedule_next_dose(user_id: int) -> None:
         # Follow-up nudge
         reminder_dt = max(next_dt, now)
         followup_dt = reminder_dt + datetime.timedelta(minutes=FOLLOWUP_DELAY_MINUTES)
-        if followup_dt < sleep_dt:
-            await send_dose_followup.schedule_by_time(
-                schedule_source,
-                followup_dt,
-                user_id,
-                course.id,
-                day,
-                phase_info.phase,
-                dose_number,
-            )
+        await send_dose_followup.schedule_by_time(
+            schedule_source,
+            followup_dt,
+            user_id,
+            course.id,
+            day,
+            phase_info.phase,
+            dose_number,
+        )
 
         # Timeout: advance chain if dose not confirmed within one interval
         timeout_dt = reminder_dt + datetime.timedelta(minutes=phase_info.interval_minutes)
-        if timeout_dt < sleep_dt:
-            await handle_dose_timeout.schedule_by_time(
-                schedule_source,
-                timeout_dt,
-                user_id,
-                dose_number,
-            )
+        await handle_dose_timeout.schedule_by_time(
+            schedule_source,
+            timeout_dt,
+            user_id,
+            dose_number,
+        )
 
 
 @broker.task

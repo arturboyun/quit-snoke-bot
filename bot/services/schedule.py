@@ -114,7 +114,7 @@ def calculate_dose_times(
     slots: list[DoseSlot] = []
     current = start_dt
 
-    while current < sleep_dt and len(slots) < phase.target_tablets:
+    while len(slots) < phase.target_tablets:
         slots.append(DoseSlot(time=current, day=day, phase=phase.phase))
         current += interval
 
@@ -208,8 +208,6 @@ def build_adaptive_schedule(
                 next_dt = wake_dt
 
         for _ in range(remaining):
-            if next_dt >= sleep_dt:
-                break
             slots.append(AdaptiveSlot(time=next_dt, taken=False))
             next_dt += interval
 

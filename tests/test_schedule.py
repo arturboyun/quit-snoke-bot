@@ -206,16 +206,16 @@ class TestCalculateDoseTimes:
             delta = slots[i].time - slots[i - 1].time
             assert delta == datetime.timedelta(minutes=150)
 
-    def test_no_dose_after_sleep_time(
+    def test_doses_always_reach_target(
         self,
         wake_time: datetime.time,
         sleep_time: datetime.time,
         course_start_date: datetime.date,
         timezone: str,
     ) -> None:
+        """All target tablets are scheduled even if they extend past sleep_time."""
         slots = calculate_dose_times(1, wake_time, sleep_time, course_start_date, timezone)
-        for s in slots:
-            assert s.time.hour < 22 or (s.time.hour == 22 and s.time.minute == 0)
+        assert len(slots) == 6  # Phase 1 target
 
     def test_returns_dose_slot_dataclass(
         self,
@@ -251,7 +251,7 @@ class TestCalculateDoseTimes:
             calculate_dose_times(0, wake_time, sleep_time, course_start_date, timezone)
 
     def test_short_waking_window(self, course_start_date: datetime.date, timezone: str) -> None:
-        # Very short window: 10:00–14:00 (4 hours) — Phase 1 should fit only 2 doses
+        # Short window: 10:00–14:00 — all 6 doses still scheduled (extend past sleep)
         slots = calculate_dose_times(
             1,
             datetime.time(10, 0),
@@ -259,7 +259,7 @@ class TestCalculateDoseTimes:
             course_start_date,
             timezone,
         )
-        assert len(slots) == 2
+        assert len(slots) == 6
 
     def test_overnight_sleep(self, course_start_date: datetime.date, timezone: str) -> None:
         # Sleep time crosses midnight: wake 20:00, sleep 06:00 next day
@@ -290,9 +290,9 @@ class TestCalculateDoseTimes:
             timezone,
             first_dose_at=first_dose,
         )
-        # First dose at 12:30, then 14:30, 16:30, 18:30, 20:30 — 5 fit before 22:00
+        # First dose at 12:30, then 14:30, 16:30, 18:30, 20:30, 22:30 — all 6 target
         assert slots[0].time == first_dose
-        assert len(slots) == 5
+        assert len(slots) == 6
         for i in range(1, len(slots)):
             delta = slots[i].time - slots[i - 1].time
             assert delta == datetime.timedelta(hours=2)
@@ -338,10 +338,8 @@ class TestCalculateDoseTimes:
         assert slots[0].time.minute == 0
         assert len(slots) == 6
 
-    def test_first_dose_at_late_evening_few_doses(
-        self, course_start_date: datetime.date, timezone: str
-    ) -> None:
-        """Course started very late — only 1 dose fits before sleep."""
+    def test_first_dose_at_late_evening_all_doses(self, course_start_date: datetime.date, timezone: str) -> None:
+        """Course started very late — all target doses still scheduled past sleep."""
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(timezone)
@@ -354,7 +352,7 @@ class TestCalculateDoseTimes:
             timezone,
             first_dose_at=first_dose,
         )
-        assert len(slots) == 1
+        assert len(slots) == 6
         assert slots[0].time == first_dose
 
 
@@ -608,8 +606,8 @@ class TestBuildAdaptiveSchedule:
         for s, t in zip(slots, taken):
             assert s.time == t
 
-    def test_projected_doses_respect_sleep_time(self) -> None:
-        """Projected doses don't extend past sleep time."""
+    def test_projected_doses_extend_past_sleep_time(self) -> None:
+        """All target tablets are shown even if they extend past sleep time."""
         tz = self._tz()
         taken_at = datetime.datetime(2025, 1, 1, 21, 0, tzinfo=tz)
         now = datetime.datetime(2025, 1, 1, 21, 30, tzinfo=tz)
@@ -621,10 +619,11 @@ class TestBuildAdaptiveSchedule:
             taken_times=[taken_at],
             now=now,
         )
-        # Only the taken dose at 21:00 and projected at 23:00 would be at sleep boundary
-        for s in slots:
-            if not s.taken:
-                assert s.time < datetime.datetime(2025, 1, 1, 23, 0, tzinfo=tz)
+        # 1 taken + 5 projected = 6 total (phase 1 target)
+        assert len(slots) == 6
+        assert slots[0].taken is True
+        # Projected slots extend past sleep_time (23:00)
+        assert slots[-1].time > datetime.datetime(2025, 1, 1, 23, 0, tzinfo=tz)
 
     def test_phase2_interval(self) -> None:
         """Phase 2 (day 5) uses 2.5h interval for projections."""

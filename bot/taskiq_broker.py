@@ -1,6 +1,6 @@
 """TaskIQ broker and scheduler configuration."""
 
-from taskiq import TaskiqScheduler
+from taskiq import TaskiqEvents, TaskiqScheduler, TaskiqState
 from taskiq_redis import ListQueueBroker, ListRedisScheduleSource
 
 from bot.config import settings
@@ -16,3 +16,13 @@ scheduler = TaskiqScheduler(
     broker=broker,
     sources=[schedule_source],
 )
+
+
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def _worker_startup(state: TaskiqState) -> None:
+    await schedule_source.startup()
+
+
+@broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
+async def _worker_shutdown(state: TaskiqState) -> None:
+    await schedule_source.shutdown()

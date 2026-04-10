@@ -24,7 +24,7 @@ from bot.services.course import (
     log_dose,
     start_course,
 )
-from bot.services.schedule import get_phase
+from bot.services.schedule import get_course_day, get_phase
 from bot.taskiq_broker import schedule_source
 from bot.tasks import schedule_daily_doses, schedule_next_day, schedule_next_dose
 from bot.utils.texts import (
@@ -128,6 +128,15 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
         tz = ZoneInfo(user.timezone)
         now = datetime.datetime.now(tz)
         today = now.date()
+        day = get_course_day(active.start_date, today)
+
+        # Stale day protection: button from a different day
+        if callback_data.day != day:
+            await callback.answer(
+                "⏰ Кнопка устарела — используй меню",
+                show_alert=True,
+            )
+            return
 
         # Waking hours check
         now_time = now.time()
@@ -146,7 +155,7 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
                 )
                 return
 
-        phase_info = get_phase(callback_data.day)
+        phase_info = get_phase(day)
 
         # Overdose protection: don't exceed target_tablets for the day
         taken = await get_doses_taken_today(session, active.id, today)
@@ -158,7 +167,7 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
             return
 
         # Check minimum interval since last dose
-        last_time = await get_last_dose_time(session, active.id, callback_data.day)
+        last_time = await get_last_dose_time(session, active.id, day)
         if last_time is not None:
             last_aware = last_time if last_time.tzinfo else last_time.replace(tzinfo=datetime.UTC)
             elapsed = (
@@ -178,8 +187,8 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
             course_id=callback_data.course_id,
             user_id=callback.from_user.id,
             scheduled_at=now,
-            day=callback_data.day,
-            phase=callback_data.phase,
+            day=day,
+            phase=phase_info.phase,
         )
 
         taken = await get_doses_taken_today(session, active.id, today)

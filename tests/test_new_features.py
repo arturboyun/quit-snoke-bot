@@ -373,6 +373,8 @@ class TestNewKeyboards:
 
 
 class TestNewMenuHandlers:
+    """Test dialog getters and button callbacks from bot.dialogs.menu."""
+
     @pytest.fixture(autouse=True)
     def _patch_taskiq(self):
         with (
@@ -385,138 +387,144 @@ class TestNewMenuHandlers:
             mock_snd.kiq = AsyncMock()
             yield
 
+    def _make_dialog_manager(self, user_id: int = 123) -> MagicMock:
+        dm = MagicMock()
+        dm.start = AsyncMock()
+        dm.switch_to = AsyncMock()
+        dm.done = AsyncMock()
+        dm.event = MagicMock()
+        dm.event.from_user = MagicMock()
+        dm.event.from_user.id = user_id
+        dm.dialog_data = {}
+        dm.middleware_data = {"state": _make_state()}
+        return dm
+
     async def test_sos_no_course(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_sos
+        from bot.dialogs.menu import on_sos
 
         cb = _make_callback(user_id=900)
+        dm = self._make_dialog_manager(900)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 900)
             await session.commit()
 
-        await on_menu_sos(cb)
+        await on_sos(cb, btn, dm)
         cb.answer.assert_called()
         assert "нет активного" in cb.answer.call_args[0][0].lower()
 
     async def test_sos_with_course(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_sos
+        from bot.dialogs.menu import on_sos
 
         cb = _make_callback(user_id=901)
+        dm = self._make_dialog_manager(901)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 901)
             await start_course(session, 901, datetime.date.today())
             await session.commit()
 
-        await on_menu_sos(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
+        await on_sos(cb, btn, dm)
+        assert "sos_text" in dm.dialog_data
+        text = dm.dialog_data["sos_text"]
         assert "Тяга" in text or "тяга" in text
+        dm.switch_to.assert_called_once()
 
     async def test_savings_no_profile(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_savings
+        from bot.dialogs.menu import savings_getter
 
-        cb = _make_callback(user_id=902)
+        dm = self._make_dialog_manager(902)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 902)
             await start_course(session, 902, datetime.date.today())
             await session.commit()
 
-        await on_menu_savings(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
-        assert "профиль" in text.lower()
+        result = await savings_getter(dialog_manager=dm)
+        assert "профиль" in result["text"].lower()
 
     async def test_savings_with_profile(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_savings
+        from bot.dialogs.menu import savings_getter
 
-        cb = _make_callback(user_id=903)
+        dm = self._make_dialog_manager(903)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 903)
-            # Start course 10 days ago (past quit day)
             await start_course(
-                session,
-                903,
-                datetime.date.today() - datetime.timedelta(days=9),
+                session, 903, datetime.date.today() - datetime.timedelta(days=9),
             )
             await save_smoking_profile(session, 903, 20, 150.0)
             await session.commit()
 
-        await on_menu_savings(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
+        result = await savings_getter(dialog_manager=dm)
+        text = result["text"]
         assert "Экономия" in text or "экономил" in text.lower() or "Сэкономлено" in text
 
     async def test_health_timeline(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_health
+        from bot.dialogs.menu import health_getter
 
-        cb = _make_callback(user_id=904)
+        dm = self._make_dialog_manager(904)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 904)
             await start_course(session, 904, datetime.date.today())
             await session.commit()
 
-        await on_menu_health(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
-        assert "Восстановление" in text
+        result = await health_getter(dialog_manager=dm)
+        assert "Восстановление" in result["text"]
 
     async def test_achievements_empty(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_achievements
+        from bot.dialogs.menu import achievements_getter
 
-        cb = _make_callback(user_id=905)
+        dm = self._make_dialog_manager(905)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 905)
             await session.commit()
 
-        await on_menu_achievements(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
-        assert "Достижения" in text
+        result = await achievements_getter(dialog_manager=dm)
+        assert "Достижения" in result["text"]
 
-    async def test_relapse_flow(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_relapse, on_relapse_count
+    @patch("bot.dialogs.menu.schedule_next_dose")
+    async def test_relapse_flow(self, mock_snd, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_relapse_count_entered
 
-        # Step 1: click relapse button
-        cb = _make_callback(user_id=906)
-        state = _make_state()
+        mock_snd.kiq = AsyncMock()
+
+        dm = self._make_dialog_manager(906)
+        msg = _make_message(user_id=906, text="3")
+        widget = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 906)
             await start_course(session, 906, datetime.date.today())
             await session.commit()
 
-        await on_menu_relapse(cb, state)
-        state.set_state.assert_called_once()
-
-        # Step 2: send cigarette count
-        msg = _make_message(user_id=906, text="3")
-        await on_relapse_count(msg, state)
-        state.clear.assert_called_once()
-        msg.answer.assert_called_once()
-        text = msg.answer.call_args[0][0]
-        assert "Записано" in text
+        await on_relapse_count_entered(msg, widget, dm, 3)
+        assert "relapse_text" in dm.dialog_data
+        assert "Записано" in dm.dialog_data["relapse_text"]
+        dm.switch_to.assert_called_once()
 
     async def test_relapse_invalid_count(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_relapse_count
+        from bot.dialogs.menu import _validate_relapse_count
 
-        msg = _make_message(user_id=907, text="abc")
-        state = _make_state()
-        await on_relapse_count(msg, state)
-        msg.answer.assert_called_once()
-        assert "число" in msg.answer.call_args[0][0].lower()
-        state.clear.assert_not_called()
+        with pytest.raises(ValueError):
+            _validate_relapse_count("abc")
+        with pytest.raises(ValueError):
+            _validate_relapse_count("0")
+        with pytest.raises(ValueError):
+            _validate_relapse_count("101")
+        assert _validate_relapse_count("5") == 5
 
     async def test_mood_history_handler(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_mood_history
+        from bot.dialogs.menu import mood_history_getter
 
-        cb = _make_callback(user_id=908)
+        dm = self._make_dialog_manager(908)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 908)
             await log_mood(session, 908, "good")
             await session.commit()
 
-        await on_menu_mood_history(cb)
-        cb.message.edit_text.assert_called_once()
-        text = cb.message.edit_text.call_args[0][0]
-        assert "Настроение" in text
+        result = await mood_history_getter(dialog_manager=dm)
+        assert "Настроение" in result["text"]
 
 
 # ── Mood Handler ─────────────────────────────────────────────────────────────
@@ -582,7 +590,9 @@ class TestSmokingProfileHandlers:
             await get_or_create_user(session, 923)
             await session.commit()
 
-        await on_pack_price(msg, state)
+        dm = MagicMock()
+        dm.start = AsyncMock()
+        await on_pack_price(msg, state, dm)
         state.clear.assert_called_once()
         msg.answer.assert_called_once()
 
@@ -591,7 +601,9 @@ class TestSmokingProfileHandlers:
 
         msg = _make_message(user_id=924, text="abc")
         state = _make_state()
-        await on_pack_price(msg, state)
+        dm = MagicMock()
+        dm.start = AsyncMock()
+        await on_pack_price(msg, state, dm)
         msg.answer.assert_called_once()
         assert (
             "число" in msg.answer.call_args[0][0].lower()
@@ -634,7 +646,9 @@ class TestOnboardingSmokingProfile:
             await get_or_create_user(session, 932)
             await session.commit()
 
-        await on_onboard_pack_price(msg, state)
+        dm = MagicMock()
+        dm.start = AsyncMock()
+        await on_onboard_pack_price(msg, state, dm)
         state.clear.assert_called_once()
         msg.answer.assert_called_once()
 
@@ -643,7 +657,9 @@ class TestOnboardingSmokingProfile:
 
         msg = _make_message(user_id=933, text="abc")
         state = _make_state()
-        await on_onboard_pack_price(msg, state)
+        dm = MagicMock()
+        dm.start = AsyncMock()
+        await on_onboard_pack_price(msg, state, dm)
         msg.answer.assert_called_once()
         state.clear.assert_not_called()
 

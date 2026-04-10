@@ -1,4 +1,4 @@
-"""Tests for handlers — start, course, settings, menu, progress."""
+"""Tests for handlers — start, course, settings, menu dialog getters."""
 
 import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,6 +42,19 @@ def _make_state() -> MagicMock:
     return state
 
 
+def _make_dialog_manager(user_id: int = 123) -> MagicMock:
+    dm = MagicMock()
+    dm.start = AsyncMock()
+    dm.switch_to = AsyncMock()
+    dm.done = AsyncMock()
+    dm.event = MagicMock()
+    dm.event.from_user = MagicMock()
+    dm.event.from_user.id = user_id
+    dm.dialog_data = {}
+    dm.middleware_data = {"state": _make_state()}
+    return dm
+
+
 # ── Start Handlers ───────────────────────────────────────────────────────────
 
 
@@ -51,7 +64,8 @@ class TestStartHandlers:
 
         msg = _make_message(user_id=111)
         state = _make_state()
-        await cmd_start(msg, state)
+        dm = _make_dialog_manager(111)
+        await cmd_start(msg, state, dm)
 
         assert msg.answer.call_count == 2
         state.set_state.assert_called_once()
@@ -169,56 +183,6 @@ class TestCourseHandlers:
             self.mock_schedule_next_dose = mock_snd2
             yield
 
-    async def test_start_course_no_active(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_start_course
-
-        cb = _make_callback(user_id=300)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 300)
-            await session.commit()
-
-        await on_menu_start_course(cb)
-        cb.message.edit_text.assert_called_once()
-        # Now shows confirmation instead of creating immediately
-        assert "Готов начать" in cb.message.edit_text.call_args[0][0]
-
-    async def test_start_course_already_active(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_start_course
-
-        cb = _make_callback(user_id=301)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 301)
-            await start_course(session, 301, datetime.date(2026, 1, 1))
-            await session.commit()
-
-        await on_menu_start_course(cb)
-        cb.message.edit_text.assert_called_once()
-
-    async def test_cancel_course_none(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_cancel_course
-
-        cb = _make_callback(user_id=302)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 302)
-            await session.commit()
-
-        await on_menu_cancel_course(cb)
-        cb.answer.assert_called_once()
-        assert "нет активного" in cb.answer.call_args[0][0].lower()
-
-    async def test_cancel_course_active(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_cancel_course
-
-        cb = _make_callback(user_id=303)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 303)
-            await start_course(session, 303, datetime.date(2026, 1, 1))
-            await session.commit()
-
-        await on_menu_cancel_course(cb)
-        cb.message.edit_text.assert_called_once()
-        assert "Уверен" in cb.message.edit_text.call_args[0][0]
-
     async def test_on_confirm_start(self, mock_session_factory) -> None:
         from bot.handlers.course import on_confirm_start
 
@@ -302,62 +266,36 @@ class TestSettingsHandlers:
         with (
             patch("bot.handlers.settings.schedule_source") as mock_ss,
             patch("bot.handlers.settings.schedule_daily_doses") as mock_sdd,
+            patch("bot.handlers.settings.schedule_next_day") as mock_snd,
         ):
             mock_ss.startup = AsyncMock()
             mock_sdd.kiq = AsyncMock()
+            mock_snd.kiq = AsyncMock()
             yield
-
-    async def test_on_change_timezone(self, mock_session_factory) -> None:
-        from bot.handlers.settings import on_change_timezone
-
-        cb = _make_callback()
-        state = _make_state()
-        await on_change_timezone(cb, state)
-
-        cb.message.answer.assert_called_once()
-        state.set_state.assert_called_once()
-        cb.answer.assert_called_once()
-
-    async def test_on_change_wake(self, mock_session_factory) -> None:
-        from bot.handlers.settings import on_change_wake
-
-        cb = _make_callback()
-        state = _make_state()
-        await on_change_wake(cb, state)
-
-        cb.message.answer.assert_called_once()
-        state.set_state.assert_called_once()
-
-    async def test_on_change_sleep(self, mock_session_factory) -> None:
-        from bot.handlers.settings import on_change_sleep
-
-        cb = _make_callback()
-        state = _make_state()
-        await on_change_sleep(cb, state)
-
-        cb.message.answer.assert_called_once()
-        state.set_state.assert_called_once()
 
     async def test_on_settings_timezone_valid(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_settings_timezone
 
         msg = _make_message(user_id=400, text="Asia/Tokyo")
         state = _make_state()
+        dm = _make_dialog_manager(400)
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 400)
             await session.commit()
 
-        await on_settings_timezone(msg, state)
+        await on_settings_timezone(msg, state, dm)
         state.clear.assert_called_once()
         msg.answer.assert_called_once()
+        dm.start.assert_called_once()
 
     async def test_on_settings_timezone_invalid(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_settings_timezone
 
         msg = _make_message(text="Bad/Zone")
         state = _make_state()
-        await on_settings_timezone(msg, state)
+        dm = _make_dialog_manager()
+        await on_settings_timezone(msg, state, dm)
 
         msg.answer.assert_called_once()
         state.clear.assert_not_called()
@@ -367,21 +305,24 @@ class TestSettingsHandlers:
 
         cb = _make_callback(user_id=401, data="tz:Europe/Berlin")
         state = _make_state()
+        dm = _make_dialog_manager(401)
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 401)
             await session.commit()
 
-        await on_settings_timezone_button(cb, state)
+        await on_settings_timezone_button(cb, state, dm)
         state.clear.assert_called_once()
         cb.message.edit_text.assert_called_once()
+        dm.start.assert_called_once()
 
     async def test_on_settings_timezone_button_invalid(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_settings_timezone_button
 
         cb = _make_callback(data="tz:Fake/Zone")
         state = _make_state()
-        await on_settings_timezone_button(cb, state)
+        dm = _make_dialog_manager()
+        await on_settings_timezone_button(cb, state, dm)
 
         cb.answer.assert_called_once()
         state.clear.assert_not_called()
@@ -391,20 +332,23 @@ class TestSettingsHandlers:
 
         msg = _make_message(user_id=402, text="06:30")
         state = _make_state()
+        dm = _make_dialog_manager(402)
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 402)
             await session.commit()
 
-        await on_settings_wake(msg, state)
+        await on_settings_wake(msg, state, dm)
         state.clear.assert_called_once()
+        dm.start.assert_called_once()
 
     async def test_on_settings_wake_invalid(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_settings_wake
 
         msg = _make_message(text="nope")
         state = _make_state()
-        await on_settings_wake(msg, state)
+        dm = _make_dialog_manager()
+        await on_settings_wake(msg, state, dm)
 
         msg.answer.assert_called_once()
         state.clear.assert_not_called()
@@ -414,77 +358,203 @@ class TestSettingsHandlers:
 
         msg = _make_message(user_id=403, text="23:30")
         state = _make_state()
+        dm = _make_dialog_manager(403)
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 403)
             await session.commit()
 
-        await on_settings_sleep(msg, state)
+        await on_settings_sleep(msg, state, dm)
         state.clear.assert_called_once()
+        dm.start.assert_called_once()
 
     async def test_on_settings_sleep_invalid(self, mock_session_factory) -> None:
         from bot.handlers.settings import on_settings_sleep
 
         msg = _make_message(text="abc")
         state = _make_state()
-        await on_settings_sleep(msg, state)
+        dm = _make_dialog_manager()
+        await on_settings_sleep(msg, state, dm)
 
         msg.answer.assert_called_once()
         state.clear.assert_not_called()
 
 
-# ── Menu Handlers ────────────────────────────────────────────────────────────
+# ── Dialog Getters ───────────────────────────────────────────────────────────
 
 
-class TestMenuHandlers:
-    async def test_on_menu_back_shows_menu(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_back
+class TestDialogGetters:
+    async def test_main_getter_no_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import main_getter
 
-        cb = _make_callback(user_id=420)
+        dm = _make_dialog_manager(user_id=420)
         async with mock_session_factory() as session:
             await get_or_create_user(session, 420)
             await session.commit()
 
-        await on_menu_back(cb)
-        cb.message.edit_text.assert_called_once()
-        cb.answer.assert_called_once()
+        result = await main_getter(dialog_manager=dm)
+        assert result["has_course"] is False
+        assert "Главное меню" in result["text"]
 
-    async def test_on_menu_back(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_back
+    async def test_main_getter_with_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import main_getter
 
-        cb = _make_callback()
-        await on_menu_back(cb)
-        cb.message.edit_text.assert_called_once()
-        cb.answer.assert_called_once()
+        dm = _make_dialog_manager(user_id=421)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 421)
+            await start_course(session, 421, datetime.date.today())
+            await session.commit()
 
-    async def test_on_menu_help(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_help
+        result = await main_getter(dialog_manager=dm)
+        assert result["has_course"] is True
+        assert "День" in result["text"]
 
-        cb = _make_callback()
-        await on_menu_help(cb)
-        cb.message.edit_text.assert_called_once()
-        cb.answer.assert_called_once()
+    async def test_progress_getter_no_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import progress_getter
 
-    async def test_on_menu_take_dose_no_course(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_take_dose
+        dm = _make_dialog_manager(user_id=422)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 422)
+            await session.commit()
+
+        result = await progress_getter(dialog_manager=dm)
+        assert "Нет активного" in result["text"]
+
+    async def test_progress_getter_success(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import progress_getter
+
+        dm = _make_dialog_manager(user_id=423)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 423)
+            await start_course(session, 423, datetime.date.today())
+            await session.commit()
+
+        result = await progress_getter(dialog_manager=dm)
+        assert "Прогресс" in result["text"]
+
+    async def test_schedule_getter_no_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import schedule_getter
+
+        dm = _make_dialog_manager(user_id=424)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 424)
+            await session.commit()
+
+        result = await schedule_getter(dialog_manager=dm)
+        assert "Нет активного" in result["text"]
+
+    async def test_schedule_getter_success(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import schedule_getter
+
+        dm = _make_dialog_manager(user_id=425)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 425)
+            await start_course(session, 425, datetime.date.today())
+            await session.commit()
+
+        result = await schedule_getter(dialog_manager=dm)
+        assert "Расписание" in result["text"]
+
+    async def test_settings_getter(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import settings_getter
+
+        dm = _make_dialog_manager(user_id=426)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 426)
+            await session.commit()
+
+        result = await settings_getter(dialog_manager=dm)
+        assert "настройки" in result["text"].lower()
+
+    async def test_achievements_getter(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import achievements_getter
+
+        dm = _make_dialog_manager(user_id=427)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 427)
+            await session.commit()
+
+        result = await achievements_getter(dialog_manager=dm)
+        assert "Достижения" in result["text"]
+
+    async def test_history_getter_empty(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import history_getter
+
+        dm = _make_dialog_manager(user_id=428)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 428)
+            await session.commit()
+
+        result = await history_getter(dialog_manager=dm)
+        assert "История" in result["text"] or "пуста" in result["text"]
+
+    async def test_mood_history_getter(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import mood_history_getter
+
+        dm = _make_dialog_manager(user_id=429)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 429)
+            await session.commit()
+
+        result = await mood_history_getter(dialog_manager=dm)
+        assert "Настроение" in result["text"]
+
+    async def test_confirm_start_getter_no_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import confirm_start_getter
+
+        dm = _make_dialog_manager(user_id=430)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 430)
+            await session.commit()
+
+        result = await confirm_start_getter(dialog_manager=dm)
+        assert "Готов начать" in result["text"]
+
+    async def test_confirm_start_getter_active(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import confirm_start_getter
+
+        dm = _make_dialog_manager(user_id=431)
+        async with mock_session_factory() as session:
+            await get_or_create_user(session, 431)
+            await start_course(session, 431, datetime.date.today())
+            await session.commit()
+
+        result = await confirm_start_getter(dialog_manager=dm)
+        assert "уже есть" in result["text"].lower()
+
+
+# ── Dialog Button Callbacks ──────────────────────────────────────────────────
+
+
+class TestDialogCallbacks:
+    @pytest.fixture(autouse=True)
+    def _patch_taskiq(self):
+        with (
+            patch("bot.dialogs.menu.schedule_next_dose") as mock_snd,
+        ):
+            mock_snd.kiq = AsyncMock()
+            self.mock_schedule_next_dose = mock_snd
+            yield
+
+    async def test_on_take_dose_no_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_take_dose
 
         cb = _make_callback(user_id=500)
+        dm = _make_dialog_manager(500)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 500)
             await session.commit()
 
-        await on_menu_take_dose(cb)
+        await on_take_dose(cb, btn, dm)
         cb.answer.assert_called_once()
         assert "Нет активного курса" in cb.answer.call_args[0][0]
 
-    @patch("bot.handlers.menu.schedule_next_dose")
-    @patch("bot.handlers.menu.datetime")
-    async def test_on_menu_take_dose_success(
-        self, mock_dt, mock_snd, mock_session_factory
-    ) -> None:
-        from bot.handlers.menu import on_menu_take_dose
+    @patch("bot.dialogs.menu.datetime")
+    async def test_on_take_dose_success(self, mock_dt, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_take_dose
 
-        # Fix time to midday so waking-hours check passes
         mock_dt.datetime.now.return_value = datetime.datetime(
             2026, 4, 10, 12, 0, tzinfo=datetime.UTC
         )
@@ -492,139 +562,68 @@ class TestMenuHandlers:
         mock_dt.datetime.combine = datetime.datetime.combine
         mock_dt.timedelta = datetime.timedelta
 
-        mock_snd.kiq = AsyncMock()
-
         cb = _make_callback(user_id=501)
+        dm = _make_dialog_manager(501)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 501)
             await start_course(session, 501, datetime.date.today())
             await session.commit()
 
-        await on_menu_take_dose(cb)
-        cb.message.edit_text.assert_called_once()
+        await on_take_dose(cb, btn, dm)
+        cb.answer.assert_called_once()
         assert "Отмечено" in cb.answer.call_args[0][0]
-        mock_snd.kiq.assert_called_once()
+        self.mock_schedule_next_dose.kiq.assert_called_once()
 
-    async def test_on_menu_take_dose_course_ended(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_take_dose
+    async def test_on_take_dose_course_ended(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_take_dose
 
         cb = _make_callback(user_id=502)
-        # Course started 30 days ago — day > 25
+        dm = _make_dialog_manager(502)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
             await get_or_create_user(session, 502)
             await start_course(
-                session,
-                502,
-                datetime.date.today() - datetime.timedelta(days=30),
+                session, 502, datetime.date.today() - datetime.timedelta(days=30),
             )
             await session.commit()
 
-        await on_menu_take_dose(cb)
+        await on_take_dose(cb, btn, dm)
         cb.answer.assert_called_once()
         assert "завершён" in cb.answer.call_args[0][0].lower()
 
-    async def test_on_menu_progress_no_course(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_progress
+    async def test_on_confirm_cancel_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_confirm_cancel_course
 
-        cb = _make_callback(user_id=503)
+        cb = _make_callback(user_id=510)
+        dm = _make_dialog_manager(510)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
-            await get_or_create_user(session, 503)
+            await get_or_create_user(session, 510)
+            await start_course(session, 510, datetime.date(2026, 1, 1))
             await session.commit()
 
-        await on_menu_progress(cb)
+        await on_confirm_cancel_course(cb, btn, dm)
         cb.answer.assert_called_once()
+        assert "отменён" in cb.answer.call_args[0][0].lower()
+        dm.switch_to.assert_called_once()
 
-    async def test_on_menu_progress_success(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_progress
+    async def test_on_confirm_complete_course(self, mock_session_factory) -> None:
+        from bot.dialogs.menu import on_confirm_complete_course
 
-        cb = _make_callback(user_id=504)
+        cb = _make_callback(user_id=511)
+        dm = _make_dialog_manager(511)
+        btn = MagicMock()
+
         async with mock_session_factory() as session:
-            await get_or_create_user(session, 504)
-            await start_course(session, 504, datetime.date.today())
+            await get_or_create_user(session, 511)
+            await start_course(session, 511, datetime.date(2026, 1, 1))
             await session.commit()
 
-        await on_menu_progress(cb)
-        cb.message.edit_text.assert_called_once()
-        assert "Прогресс" in cb.message.edit_text.call_args[0][0]
-
-    async def test_on_menu_schedule_no_course(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_schedule
-
-        cb = _make_callback(user_id=505)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 505)
-            await session.commit()
-
-        await on_menu_schedule(cb)
-        cb.answer.assert_called_once()
-
-    async def test_on_menu_schedule_success(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_schedule
-
-        cb = _make_callback(user_id=506)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 506)
-            await start_course(session, 506, datetime.date.today())
-            await session.commit()
-
-        await on_menu_schedule(cb)
-        cb.message.edit_text.assert_called_once()
-        assert "Расписание" in cb.message.edit_text.call_args[0][0]
-
-    async def test_on_menu_settings(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_settings
-
-        cb = _make_callback(user_id=507)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 507)
-            await session.commit()
-
-        await on_menu_settings(cb)
-        cb.message.edit_text.assert_called_once()
-        assert "настройки" in cb.message.edit_text.call_args[0][0].lower()
-
-    async def test_safe_edit_handles_bad_request(self, mock_session_factory) -> None:
-        from aiogram.exceptions import TelegramBadRequest
-
-        from bot.handlers.menu import _safe_edit
-
-        cb = _make_callback()
-        cb.message.edit_text = AsyncMock(
-            side_effect=TelegramBadRequest(method=MagicMock(), message="message is not modified"),
-        )
-        # Should not raise
-        await _safe_edit(cb, "test text")
-
-    async def test_on_menu_progress_course_ended(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_progress
-
-        cb = _make_callback(user_id=508)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 508)
-            await start_course(
-                session,
-                508,
-                datetime.date.today() - datetime.timedelta(days=30),
-            )
-            await session.commit()
-
-        await on_menu_progress(cb)
+        await on_confirm_complete_course(cb, btn, dm)
         cb.answer.assert_called_once()
         assert "завершён" in cb.answer.call_args[0][0].lower()
-
-    async def test_on_menu_schedule_course_ended(self, mock_session_factory) -> None:
-        from bot.handlers.menu import on_menu_schedule
-
-        cb = _make_callback(user_id=509)
-        async with mock_session_factory() as session:
-            await get_or_create_user(session, 509)
-            await start_course(
-                session,
-                509,
-                datetime.date.today() - datetime.timedelta(days=30),
-            )
-            await session.commit()
-
-        await on_menu_schedule(cb)
-        cb.answer.assert_called_once()
-        assert "завершён" in cb.answer.call_args[0][0].lower()
+        dm.switch_to.assert_called_once()

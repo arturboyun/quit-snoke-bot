@@ -19,6 +19,7 @@ dependencies = [
     "taskiq>=0.12",
     "taskiq-redis>=1.2",
     "redis>=5.0",
+    "aiogram-dialog>=2.2,<3",
 ]
 
 [project.optional-dependencies]

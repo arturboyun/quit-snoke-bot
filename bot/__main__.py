@@ -6,10 +6,15 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.filters import ExceptionTypeFilter
+from aiogram_dialog import ShowMode, StartMode, setup_dialogs
+from aiogram_dialog.api.exceptions import UnknownIntent, UnknownState
 from sqlalchemy import select
 
 from bot.config import settings
 from bot.db.engine import session_factory
+from bot.dialogs import dialog_router
+from bot.dialogs.menu import MenuSG
 from bot.handlers import main_router
 from bot.middlewares.throttle import ThrottleMiddleware
 from bot.models.course import Course, CourseStatus
@@ -47,6 +52,19 @@ async def main() -> None:
     dp = Dispatcher()
     dp.update.middleware(ThrottleMiddleware())
     dp.include_router(main_router)
+    dp.include_router(dialog_router)
+
+    # Handle stale dialog buttons after bot restart
+    async def on_unknown_intent(event, dialog_manager):
+        await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND)
+
+    async def on_unknown_state(event, dialog_manager):
+        await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK, show_mode=ShowMode.SEND)
+
+    dp.errors.register(on_unknown_intent, ExceptionTypeFilter(UnknownIntent))
+    dp.errors.register(on_unknown_state, ExceptionTypeFilter(UnknownState))
+
+    setup_dialogs(dp)
 
     # Start TaskIQ broker (client side — for sending tasks)
     await broker.startup()

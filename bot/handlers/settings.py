@@ -7,9 +7,11 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from aiogram_dialog import DialogManager, StartMode
 
 from bot.db.engine import session_factory
-from bot.keyboards.inline import SettingsCallback, main_menu_keyboard, timezone_keyboard
+from bot.dialogs.menu import MenuSG
+from bot.keyboards.inline import SettingsCallback, timezone_keyboard
 from bot.services.course import (
     get_active_course,
     save_smoking_profile,
@@ -66,7 +68,7 @@ async def on_change_sleep(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(SettingsStates.waiting_timezone)
-async def on_settings_timezone(message: Message, state: FSMContext) -> None:
+async def on_settings_timezone(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     if not message.text:
         await message.answer(invalid_timezone_text(), parse_mode="HTML")
         return
@@ -89,15 +91,12 @@ async def on_settings_timezone(message: Message, state: FSMContext) -> None:
         await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
-    await message.answer(
-        settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=has_course),
-        parse_mode="HTML",
-    )
+    await message.answer(settings_saved_text(), parse_mode="HTML")
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
 
 
 @router.callback_query(SettingsStates.waiting_timezone, F.data.startswith("tz:"))
-async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext, dialog_manager: DialogManager) -> None:
     tz_name = callback.data.split(":", 1)[1]
     try:
         ZoneInfo(tz_name)
@@ -119,14 +118,14 @@ async def on_settings_timezone_button(callback: CallbackQuery, state: FSMContext
     await state.clear()
     await callback.message.edit_text(
         f"🌍 Часовой пояс: <b>{tz_name}</b> ✅",
-        reply_markup=main_menu_keyboard(has_course=has_course),
         parse_mode="HTML",
     )
     await callback.answer()
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
 
 
 @router.message(SettingsStates.waiting_wake_time)
-async def on_settings_wake(message: Message, state: FSMContext) -> None:
+async def on_settings_wake(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     if not message.text:
         await message.answer(invalid_time_format_text(), parse_mode="HTML")
         return
@@ -148,15 +147,12 @@ async def on_settings_wake(message: Message, state: FSMContext) -> None:
         await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
-    await message.answer(
-        settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=has_course),
-        parse_mode="HTML",
-    )
+    await message.answer(settings_saved_text(), parse_mode="HTML")
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
 
 
 @router.message(SettingsStates.waiting_sleep_time)
-async def on_settings_sleep(message: Message, state: FSMContext) -> None:
+async def on_settings_sleep(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     if not message.text:
         await message.answer(invalid_time_format_text(), parse_mode="HTML")
         return
@@ -178,11 +174,8 @@ async def on_settings_sleep(message: Message, state: FSMContext) -> None:
         await schedule_next_day.kiq(message.from_user.id)
 
     await state.clear()
-    await message.answer(
-        settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=has_course),
-        parse_mode="HTML",
-    )
+    await message.answer(settings_saved_text(), parse_mode="HTML")
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
 
 
 # ── Smoking Profile ──────────────────────────────────────────────────────────
@@ -211,7 +204,7 @@ async def on_cigarettes_per_day(message: Message, state: FSMContext) -> None:
 
 
 @router.message(SettingsStates.waiting_pack_price)
-async def on_pack_price(message: Message, state: FSMContext) -> None:
+async def on_pack_price(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     try:
         price = float(message.text.strip().replace(",", "."))
         if price <= 0 or price > 100000:
@@ -231,11 +224,7 @@ async def on_pack_price(message: Message, state: FSMContext) -> None:
             pack_price=price,
         )
         await session.commit()
-        course = await get_active_course(session, message.from_user.id)
 
     await state.clear()
-    await message.answer(
-        smoking_profile_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=course is not None),
-        parse_mode="HTML",
-    )
+    await message.answer(smoking_profile_saved_text(), parse_mode="HTML")
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)

@@ -4,16 +4,17 @@ import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from aiogram_dialog import DialogManager, StartMode
 
 from bot.db.engine import session_factory
-from bot.keyboards.inline import main_menu_keyboard, timezone_keyboard
+from bot.dialogs.menu import MenuSG
+from bot.keyboards.inline import timezone_keyboard
 from bot.models.user import User
 from bot.services.course import (
-    get_active_course,
     get_or_create_user,
     save_smoking_profile,
     update_user_settings,
@@ -42,7 +43,7 @@ class OnboardingStates(StatesGroup):
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext) -> None:
+async def cmd_start(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     async with session_factory() as session:
         existing = await session.get(User, message.from_user.id)
         await get_or_create_user(session, message.from_user.id)
@@ -50,13 +51,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     if existing:
         await state.clear()
-        async with session_factory() as session:
-            course = await get_active_course(session, message.from_user.id)
-        await message.answer(
-            welcome_text(),
-            reply_markup=main_menu_keyboard(has_course=course is not None),
-            parse_mode="HTML",
-        )
+        await message.answer(welcome_text(), parse_mode="HTML")
+        await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
         return
 
     await message.answer(welcome_text(), parse_mode="HTML")
@@ -166,7 +162,7 @@ async def on_onboard_cigarettes(message: Message, state: FSMContext) -> None:
 
 
 @router.message(OnboardingStates.waiting_pack_price)
-async def on_onboard_pack_price(message: Message, state: FSMContext) -> None:
+async def on_onboard_pack_price(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
     try:
         price = float(message.text.strip().replace(",", "."))
         if price <= 0 or price > 100000:
@@ -187,8 +183,11 @@ async def on_onboard_pack_price(message: Message, state: FSMContext) -> None:
         await session.commit()
 
     await state.clear()
-    await message.answer(
-        settings_saved_text(),
-        reply_markup=main_menu_keyboard(has_course=False),
-        parse_mode="HTML",
-    )
+    await message.answer(settings_saved_text(), parse_mode="HTML")
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message, state: FSMContext, dialog_manager: DialogManager) -> None:
+    await state.clear()
+    await dialog_manager.start(MenuSG.main, mode=StartMode.RESET_STACK)

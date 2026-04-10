@@ -311,7 +311,7 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
             await callback.answer("Курс завершён", show_alert=True)
             return
 
-        taken_times = await get_today_dose_times(session, course.id, today)
+        taken_times = await get_today_dose_times(session, course.id, day)
 
     phase_info = get_phase(day)
     now = datetime.datetime.now(tz)

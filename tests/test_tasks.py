@@ -37,7 +37,7 @@ class TestSendDoseReminder:
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 111)
-            await start_course(session, 111, datetime.date.today())
+            await start_course(session, 111, datetime.date(2026, 1, 1))
             await session.commit()
 
         # Get the actual course id
@@ -495,21 +495,24 @@ class TestScheduleNextDose:
 
 
 class TestHandleDoseTimeout:
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.schedule_next_dose")
-    async def test_stale_timeout_skips(self, mock_snd, mock_session_factory) -> None:
+    async def test_stale_timeout_skips(self, mock_snd, mock_dt, mock_session_factory) -> None:
         from bot.tasks import handle_dose_timeout
 
         mock_snd.kiq = AsyncMock()
+        _now = datetime.datetime(2026, 4, 10, 10, 0, tzinfo=datetime.UTC)
+        mock_dt.datetime.now.return_value = _now
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 910)
-            course = await start_course(session, 910, datetime.date.today())
+            course = await start_course(session, 910, datetime.date(2026, 4, 10))
             # Log 1 dose → taken=1
             await log_dose(
                 session,
                 course_id=course.id,
                 user_id=910,
-                scheduled_at=datetime.datetime.now(datetime.UTC),
+                scheduled_at=_now,
                 day=1,
                 phase=1,
             )
@@ -563,20 +566,23 @@ class TestAutoStartDoses:
         await auto_start_doses(user_id=920)
         mock_snd.kiq.assert_called_once_with(920)
 
+    @patch("bot.tasks.datetime")
     @patch("bot.tasks.schedule_next_dose")
-    async def test_skips_when_doses_taken(self, mock_snd, mock_session_factory) -> None:
+    async def test_skips_when_doses_taken(self, mock_snd, mock_dt, mock_session_factory) -> None:
         from bot.tasks import auto_start_doses
 
         mock_snd.kiq = AsyncMock()
+        _now = datetime.datetime(2026, 4, 10, 10, 0, tzinfo=datetime.UTC)
+        mock_dt.datetime.now.return_value = _now
 
         async with mock_session_factory() as session:
             await get_or_create_user(session, 921)
-            course = await start_course(session, 921, datetime.date.today())
+            course = await start_course(session, 921, datetime.date(2026, 4, 10))
             await log_dose(
                 session,
                 course_id=course.id,
                 user_id=921,
-                scheduled_at=datetime.datetime.now(datetime.UTC),
+                scheduled_at=_now,
                 day=1,
                 phase=1,
             )

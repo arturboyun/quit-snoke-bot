@@ -51,8 +51,6 @@ async def send_dose_reminder(user_id: int, course_id: int, day: int, phase: int)
             if not course or course.id != course_id:
                 return
 
-            user = await get_or_create_user(session, user_id)
-
         phase_info = get_phase(day)
         text = dose_reminder_text(day, phase, phase_info.target_display)
         kb = dose_taken_keyboard(course_id=course_id, day=day, phase=phase)

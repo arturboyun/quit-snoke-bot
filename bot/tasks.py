@@ -19,9 +19,9 @@ from bot.services.course import (
 from bot.services.schedule import (
     QUIT_DAY,
     get_course_day,
-    get_sleep_datetime,
     get_phase,
     get_progress,
+    get_sleep_datetime,
     is_first_day_of_phase,
     is_within_waking_hours,
 )

@@ -87,7 +87,9 @@ def get_sleep_datetime(
     sleep_time: datetime.time,
 ) -> datetime.datetime:
     """Return the next sleep boundary for the waking window containing ``reference_dt``."""
-    sleep_dt = datetime.datetime.combine(reference_dt.date(), sleep_time, tzinfo=reference_dt.tzinfo)
+    sleep_dt = datetime.datetime.combine(
+        reference_dt.date(), sleep_time, tzinfo=reference_dt.tzinfo
+    )
     wake_dt = datetime.datetime.combine(reference_dt.date(), wake_time, tzinfo=reference_dt.tzinfo)
     if sleep_dt <= wake_dt:
         sleep_dt += datetime.timedelta(days=1)

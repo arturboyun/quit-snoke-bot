@@ -72,7 +72,9 @@ def dose_reminder_text(day: int, phase: int, target: int | str) -> str:
 
 
 def dose_taken_text(
-    taken_today: int, target: int | str, next_dose_time: str | None = None,
+    taken_today: int,
+    target: int | str,
+    next_dose_time: str | None = None,
 ) -> str:
     text = f"✅ Отлично! Приём отмечен.\nСегодня принято: {taken_today}/{target} таблеток"
     if next_dose_time:
@@ -145,10 +147,38 @@ def help_text() -> str:
     )
 
 
-def menu_text(day: int | None = None, phase: int | None = None) -> str:
+def menu_text(
+    day: int | None = None,
+    phase: int | None = None,
+    taken: int | None = None,
+    target: int | str | None = None,
+    next_time: str | None = None,
+    dose_result: str | None = None,
+) -> str:
+    if dose_result:
+        return dose_result
+
     if day is not None and phase is not None:
-        return f"📋 <b>Главное меню</b> — День {day}/25 (фаза {phase})\n\nВыбери действие:"
-    return "📋 <b>Главное меню</b>\n\nВыбери действие:"
+        header = f"📋 <b>Главное меню</b> — День {day}/25 (фаза {phase})"
+    else:
+        return "📋 <b>Главное меню</b>\n\nВыбери действие:"
+
+    parts = [header]
+
+    if taken is not None and target is not None:
+        parts.append(f"💊 Принято: {taken}/{target}")
+        if next_time:
+            parts.append(f"⏰ Следующий приём: <b>{next_time}</b>")
+        elif taken and target:
+            try:
+                t = int(target) if isinstance(target, str) and target.isdigit() else target
+                if isinstance(t, int) and taken >= t:
+                    parts.append("🎉 Все таблетки на сегодня приняты!")
+            except (ValueError, TypeError):
+                pass
+
+    parts.append("\nВыбери действие:")
+    return "\n".join(parts)
 
 
 def today_schedule_text(

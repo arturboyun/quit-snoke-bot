@@ -129,12 +129,54 @@ async def main_getter(dialog_manager: DialogManager, **kwargs) -> dict:
     user_id = dialog_manager.event.from_user.id
     ctx = await _get_user_course_ctx(user_id)
     day = ctx["day"]
-    phase = None
+    phase_info = None
+    taken = None
+    next_time = None
+
     if day and 1 <= day <= 25:
-        phase = get_phase(day).phase
+        phase_info = get_phase(day)
+        tz = ctx["tz"]
+        now = datetime.datetime.now(tz)
+        async with session_factory() as session:
+            taken = await get_doses_taken_today(
+                session,
+                ctx["course"].id,
+                ctx["today"],
+            )
+            taken_times = await get_today_dose_times(
+                session,
+                ctx["course"].id,
+                day,
+            )
+
+        # Calculate next dose time from adaptive schedule
+        if taken < phase_info.target_tablets:
+            slots = build_adaptive_schedule(
+                day=day,
+                sleep_time=ctx["user"].sleep_time,
+                wake_time=ctx["user"].wake_time,
+                timezone=ctx["user"].timezone,
+                taken_times=taken_times,
+                now=now,
+                course_start_dt=ctx["course"].created_at,
+            )
+            future = [s for s in slots if not s.taken and s.time >= now]
+            if future:
+                next_time = future[0].time.strftime("%H:%M")
+
+    # Show dose_result text if the user just took a dose
+    dose_result = dialog_manager.dialog_data.pop("dose_result", None)
+
     return {
         "has_course": ctx["has_course"],
-        "text": menu_text(day, phase) if day and phase else menu_text(),
+        "text": menu_text(
+            day=day,
+            phase=phase_info.phase if phase_info else None,
+            taken=taken,
+            target=phase_info.target_display if phase_info else None,
+            next_time=next_time,
+            dose_result=dose_result,
+        ),
     }
 
 
@@ -183,7 +225,11 @@ async def schedule_getter(dialog_manager: DialogManager, **kwargs) -> dict:
     now_time = now.strftime("%H:%M")
     return {
         "text": today_schedule_text(
-            ctx["day"], phase_info.phase, times, phase_info.target_display, taken,
+            ctx["day"],
+            phase_info.phase,
+            times,
+            phase_info.target_display,
+            taken,
             now_time=now_time,
         ),
     }
@@ -252,9 +298,7 @@ async def health_getter(dialog_manager: DialogManager, **kwargs) -> dict:
         quit_dt = datetime.datetime.combine(quit_date, datetime.time(0, 0), tzinfo=ctx["tz"])
         if last_relapse is not None:
             last_relapse_aware = (
-                last_relapse
-                if last_relapse.tzinfo
-                else last_relapse.replace(tzinfo=datetime.UTC)
+                last_relapse if last_relapse.tzinfo else last_relapse.replace(tzinfo=datetime.UTC)
             )
             smoke_free_since = max(quit_dt, last_relapse_aware.astimezone(ctx["tz"]))
         else:
@@ -308,7 +352,9 @@ async def confirm_start_getter(dialog_manager: DialogManager, **kwargs) -> dict:
 
 
 async def on_take_dose(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     user_id = callback.from_user.id
     async with session_factory() as session:
@@ -331,13 +377,15 @@ async def on_take_dose(
         if user.sleep_time > user.wake_time:
             if now_time < user.wake_time or now_time >= user.sleep_time:
                 await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно", show_alert=True,
+                    "Сейчас время сна — таблетку принимать не нужно",
+                    show_alert=True,
                 )
                 return
         else:
             if user.sleep_time <= now_time < user.wake_time:
                 await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно", show_alert=True,
+                    "Сейчас время сна — таблетку принимать не нужно",
+                    show_alert=True,
                 )
                 return
 
@@ -352,9 +400,7 @@ async def on_take_dose(
 
         last_time = await get_last_dose_time(session, course.id, day)
         if last_time is not None:
-            last_aware = (
-                last_time if last_time.tzinfo else last_time.replace(tzinfo=datetime.UTC)
-            )
+            last_aware = last_time if last_time.tzinfo else last_time.replace(tzinfo=datetime.UTC)
             elapsed = (
                 now.astimezone(datetime.UTC) - last_aware.astimezone(datetime.UTC)
             ).total_seconds()
@@ -374,7 +420,9 @@ async def on_take_dose(
         )
         taken = await get_doses_taken_today(session, course.id, today)
         newly_earned = await check_and_grant_achievements(
-            session, user_id, timezone=user.timezone,
+            session,
+            user_id,
+            timezone=user.timezone,
         )
         await session.commit()
 
@@ -396,7 +444,9 @@ async def on_take_dose(
 
 
 async def on_sos(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     user_id = callback.from_user.id
     async with session_factory() as session:
@@ -433,7 +483,9 @@ async def on_sos(
         await log_craving(session, user_id)
         cravings = await get_craving_count(session, user_id)
         newly_earned = await check_and_grant_achievements(
-            session, user_id, timezone=user.timezone,
+            session,
+            user_id,
+            timezone=user.timezone,
         )
         await session.commit()
 
@@ -448,7 +500,9 @@ async def on_sos(
 
 
 async def on_confirm_start_course(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     user_id = callback.from_user.id
     async with session_factory() as session:
@@ -477,7 +531,9 @@ async def on_confirm_start_course(
 
 
 async def on_confirm_cancel_course(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     user_id = callback.from_user.id
     async with session_factory() as session:
@@ -496,7 +552,9 @@ async def on_confirm_cancel_course(
 
 
 async def on_confirm_complete_course(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     user_id = callback.from_user.id
     async with session_factory() as session:
@@ -529,7 +587,9 @@ async def on_relapse_count_entered(
 
     cpd = profile.cigarettes_per_day if profile else None
     manager.dialog_data["relapse_text"] = relapse_logged_text(
-        stats["count"], stats["total_cigarettes"], cpd,
+        stats["count"],
+        stats["total_cigarettes"],
+        cpd,
     )
     await manager.switch_to(MenuSG.main)
 
@@ -554,7 +614,9 @@ def _validate_relapse_count(text: str) -> int:
 
 
 async def on_settings_timezone(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     from bot.handlers.settings import SettingsStates
     from bot.keyboards.inline import timezone_keyboard
@@ -564,13 +626,17 @@ async def on_settings_timezone(
 
     state: FSMContext = manager.middleware_data["state"]
     await callback.message.answer(
-        ask_timezone_text(), reply_markup=timezone_keyboard(), parse_mode="HTML",
+        ask_timezone_text(),
+        reply_markup=timezone_keyboard(),
+        parse_mode="HTML",
     )
     await state.set_state(SettingsStates.waiting_timezone)
 
 
 async def on_settings_wake(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     from bot.handlers.settings import SettingsStates
     from bot.utils.texts import ask_wake_time_text
@@ -582,7 +648,9 @@ async def on_settings_wake(
 
 
 async def on_settings_sleep(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     from bot.handlers.settings import SettingsStates
     from bot.utils.texts import ask_sleep_time_text
@@ -594,7 +662,9 @@ async def on_settings_sleep(
 
 
 async def on_settings_smoking_profile(
-    callback: CallbackQuery, button: Button, manager: DialogManager,
+    callback: CallbackQuery,
+    button: Button,
+    manager: DialogManager,
 ) -> None:
     from bot.handlers.settings import SettingsStates
     from bot.utils.texts import ask_cigarettes_per_day_text

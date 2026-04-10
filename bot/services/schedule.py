@@ -145,6 +145,62 @@ def calculate_remaining_doses_today(
     return [s for s in all_slots if s.time > now]
 
 
+@dataclass(frozen=True)
+class AdaptiveSlot:
+    time: datetime.datetime
+    taken: bool
+
+
+def build_adaptive_schedule(
+    day: int,
+    sleep_time: datetime.time,
+    wake_time: datetime.time,
+    timezone: str,
+    taken_times: list[datetime.datetime],
+    now: datetime.datetime | None = None,
+) -> list[AdaptiveSlot]:
+    """Build a schedule that reflects actual intake + projected future doses.
+
+    ``taken_times`` — sorted list of actual ``taken_at`` datetimes for today.
+    The remaining doses are projected from the last actual intake using the
+    phase interval, up to ``target_tablets``.
+    """
+    phase = get_phase(day)
+    tz = ZoneInfo(timezone)
+    if now is None:
+        now = datetime.datetime.now(tz)
+    today = now.date()
+
+    sleep_dt = datetime.datetime.combine(today, sleep_time, tzinfo=tz)
+    wake_dt = datetime.datetime.combine(today, wake_time, tzinfo=tz)
+    if sleep_dt <= wake_dt:
+        sleep_dt += datetime.timedelta(days=1)
+
+    interval = datetime.timedelta(minutes=phase.interval_minutes)
+    slots: list[AdaptiveSlot] = []
+
+    # 1. Already taken doses at their real times
+    for t in taken_times:
+        t_local = t.astimezone(tz) if t.tzinfo else t.replace(tzinfo=tz)
+        slots.append(AdaptiveSlot(time=t_local, taken=True))
+
+    # 2. Project remaining doses from the last intake (or now if none taken)
+    remaining = phase.target_tablets - len(slots)
+    if remaining > 0:
+        if slots:
+            next_dt = slots[-1].time + interval
+        else:
+            next_dt = now
+
+        for _ in range(remaining):
+            if next_dt >= sleep_dt:
+                break
+            slots.append(AdaptiveSlot(time=next_dt, taken=False))
+            next_dt += interval
+
+    return slots
+
+
 def get_progress(day: int, doses_taken_today: int) -> dict[str, int | float | str]:
     """Return progress stats for the current day."""
     phase = get_phase(day)

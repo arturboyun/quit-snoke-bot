@@ -33,6 +33,7 @@ from bot.services.course import (
     get_or_create_user,
     get_relapse_stats,
     get_smoking_profile,
+    get_today_dose_times,
     get_user_achievements,
     grant_achievement,
     log_craving,
@@ -41,7 +42,7 @@ from bot.services.course import (
 )
 from bot.services.schedule import (
     QUIT_DAY,
-    calculate_dose_times,
+    build_adaptive_schedule,
     get_course_day,
     get_phase,
     get_progress,
@@ -310,18 +311,20 @@ async def on_menu_schedule(callback: CallbackQuery) -> None:
             await callback.answer("Курс завершён", show_alert=True)
             return
 
-        taken = await get_doses_taken_today(session, course.id, today)
+        taken_times = await get_today_dose_times(session, course.id, today)
 
     phase_info = get_phase(day)
-    slots = calculate_dose_times(
+    now = datetime.datetime.now(tz)
+    slots = build_adaptive_schedule(
         day=day,
-        wake_time=user.wake_time,
         sleep_time=user.sleep_time,
-        course_start_date=course.start_date,
+        wake_time=user.wake_time,
         timezone=user.timezone,
-        first_dose_at=course.created_at,
+        taken_times=taken_times,
+        now=now,
     )
     times = [s.time.strftime("%H:%M") for s in slots]
+    taken = sum(1 for s in slots if s.taken)
 
     await _safe_edit(
         callback,

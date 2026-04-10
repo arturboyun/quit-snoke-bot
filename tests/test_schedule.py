@@ -10,6 +10,7 @@ from bot.services.schedule import (
     QUIT_DAY,
     DoseSlot,
     PhaseInfo,
+    build_adaptive_schedule,
     calculate_dose_times,
     calculate_remaining_doses_today,
     get_course_day,
@@ -491,3 +492,111 @@ class TestProtocolConstants:
 
     def test_five_phases(self) -> None:
         assert len(PHASES) == 5
+
+
+TZ = "Europe/Moscow"
+
+
+class TestBuildAdaptiveSchedule:
+    """Verify that build_adaptive_schedule reflects actual intake times."""
+
+    def _tz(self) -> datetime.timezone:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(TZ)
+
+    def test_no_doses_taken_projects_from_now(self) -> None:
+        """With no doses taken, all slots projected from now."""
+        tz = self._tz()
+        now = datetime.datetime(2025, 1, 1, 9, 0, tzinfo=tz)
+        slots = build_adaptive_schedule(
+            day=1,
+            sleep_time=datetime.time(23, 0),
+            wake_time=datetime.time(7, 0),
+            timezone=TZ,
+            taken_times=[],
+            now=now,
+        )
+        assert all(not s.taken for s in slots)
+        assert len(slots) == 6  # Phase 1: 6 tablets
+        assert slots[0].time == now
+        assert slots[1].time == now + datetime.timedelta(hours=2)
+
+    def test_taken_doses_appear_at_actual_times(self) -> None:
+        """Taken doses show at real times, remaining projected from last."""
+        tz = self._tz()
+        taken_at = datetime.datetime(2025, 1, 1, 8, 15, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 1, 9, 30, tzinfo=tz)
+        slots = build_adaptive_schedule(
+            day=1,
+            sleep_time=datetime.time(23, 0),
+            wake_time=datetime.time(7, 0),
+            timezone=TZ,
+            taken_times=[taken_at],
+            now=now,
+        )
+        assert slots[0].taken is True
+        assert slots[0].time == taken_at
+        assert slots[1].taken is False
+        # Next projected from taken_at + 2h (phase 1 interval)
+        assert slots[1].time == taken_at + datetime.timedelta(hours=2)
+        assert len(slots) == 6
+
+    def test_all_doses_taken(self) -> None:
+        """When all doses taken, only taken slots returned."""
+        tz = self._tz()
+        now = datetime.datetime(2025, 1, 1, 20, 0, tzinfo=tz)
+        taken = [
+            datetime.datetime(2025, 1, 1, 8, 0, tzinfo=tz),
+            datetime.datetime(2025, 1, 1, 10, 5, tzinfo=tz),
+            datetime.datetime(2025, 1, 1, 12, 10, tzinfo=tz),
+            datetime.datetime(2025, 1, 1, 14, 15, tzinfo=tz),
+            datetime.datetime(2025, 1, 1, 16, 20, tzinfo=tz),
+            datetime.datetime(2025, 1, 1, 18, 30, tzinfo=tz),
+        ]
+        slots = build_adaptive_schedule(
+            day=1,
+            sleep_time=datetime.time(23, 0),
+            wake_time=datetime.time(7, 0),
+            timezone=TZ,
+            taken_times=taken,
+            now=now,
+        )
+        assert all(s.taken for s in slots)
+        assert len(slots) == 6
+        for s, t in zip(slots, taken):
+            assert s.time == t
+
+    def test_projected_doses_respect_sleep_time(self) -> None:
+        """Projected doses don't extend past sleep time."""
+        tz = self._tz()
+        taken_at = datetime.datetime(2025, 1, 1, 21, 0, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 1, 21, 30, tzinfo=tz)
+        slots = build_adaptive_schedule(
+            day=1,
+            sleep_time=datetime.time(23, 0),
+            wake_time=datetime.time(7, 0),
+            timezone=TZ,
+            taken_times=[taken_at],
+            now=now,
+        )
+        # Only the taken dose at 21:00 and projected at 23:00 would be at sleep boundary
+        for s in slots:
+            if not s.taken:
+                assert s.time < datetime.datetime(2025, 1, 1, 23, 0, tzinfo=tz)
+
+    def test_phase2_interval(self) -> None:
+        """Phase 2 (day 5) uses 2.5h interval for projections."""
+        tz = self._tz()
+        taken_at = datetime.datetime(2025, 1, 5, 8, 0, tzinfo=tz)
+        now = datetime.datetime(2025, 1, 5, 9, 0, tzinfo=tz)
+        slots = build_adaptive_schedule(
+            day=5,
+            sleep_time=datetime.time(23, 0),
+            wake_time=datetime.time(7, 0),
+            timezone=TZ,
+            taken_times=[taken_at],
+            now=now,
+        )
+        assert slots[0].time == taken_at
+        assert slots[1].time == taken_at + datetime.timedelta(minutes=150)  # 2.5h

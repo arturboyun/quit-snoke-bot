@@ -170,6 +170,25 @@ async def get_last_dose_time(
     return dose.taken_at if dose else None
 
 
+async def get_today_dose_times(
+    session: AsyncSession,
+    course_id: int,
+    day: int,
+) -> list[datetime.datetime]:
+    """Return taken_at times for all confirmed doses today, oldest first."""
+    stmt = (
+        select(DoseLog)
+        .where(
+            DoseLog.course_id == course_id,
+            DoseLog.day == day,
+            DoseLog.taken.is_(True),
+        )
+        .order_by(DoseLog.taken_at.asc())
+    )
+    result = await session.execute(stmt)
+    return [d.taken_at for d in result.scalars().all() if d.taken_at is not None]
+
+
 async def get_course_history(
     session: AsyncSession,
     user_id: int,

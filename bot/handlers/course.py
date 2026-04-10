@@ -24,7 +24,7 @@ from bot.services.course import (
     log_dose,
     start_course,
 )
-from bot.services.schedule import get_course_day, get_phase
+from bot.services.schedule import get_course_day, get_phase, get_sleep_datetime
 from bot.taskiq_broker import schedule_source
 from bot.tasks import schedule_daily_doses, schedule_next_day, schedule_next_dose
 from bot.utils.texts import (
@@ -138,23 +138,6 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
             )
             return
 
-        # Waking hours check
-        now_time = now.time()
-        if user.sleep_time > user.wake_time:
-            if now_time < user.wake_time or now_time >= user.sleep_time:
-                await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно",
-                    show_alert=True,
-                )
-                return
-        else:
-            if user.sleep_time <= now_time < user.wake_time:
-                await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно",
-                    show_alert=True,
-                )
-                return
-
         phase_info = get_phase(day)
 
         # Overdose protection: don't exceed target_tablets for the day
@@ -197,9 +180,7 @@ async def on_dose_taken(callback: CallbackQuery, callback_data: DoseCallback) ->
 
     # Calculate next dose time adaptively from actual intake
     next_dt = now + datetime.timedelta(minutes=phase_info.interval_minutes)
-    sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
-    if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
-        sleep_dt += datetime.timedelta(days=1)
+    sleep_dt = get_sleep_datetime(now, user.wake_time, user.sleep_time)
     next_time = next_dt.strftime("%H:%M") if next_dt < sleep_dt else None
 
     await callback.message.edit_text(

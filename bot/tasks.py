@@ -19,9 +19,11 @@ from bot.services.course import (
 from bot.services.schedule import (
     QUIT_DAY,
     get_course_day,
+    get_sleep_datetime,
     get_phase,
     get_progress,
     is_first_day_of_phase,
+    is_within_waking_hours,
 )
 from bot.taskiq_broker import broker, schedule_source
 from bot.utils.texts import (
@@ -51,6 +53,14 @@ async def send_dose_reminder(user_id: int, course_id: int, day: int, phase: int)
             if not course or course.id != course_id:
                 return
 
+            user = await get_or_create_user(session, user_id)
+            tz = ZoneInfo(user.timezone)
+            now = datetime.datetime.now(tz)
+            if get_course_day(course.start_date, now.date()) != day:
+                return
+            if not is_within_waking_hours(now, user.wake_time, user.sleep_time):
+                return
+
         phase_info = get_phase(day)
         text = dose_reminder_text(day, phase, phase_info.target_display)
         kb = dose_taken_keyboard(course_id=course_id, day=day, phase=phase)
@@ -77,7 +87,12 @@ async def send_dose_followup(
 
             user = await get_or_create_user(session, user_id)
             tz = ZoneInfo(user.timezone)
-            today = datetime.datetime.now(tz).date()
+            now = datetime.datetime.now(tz)
+            today = now.date()
+            if get_course_day(course.start_date, today) != day:
+                return
+            if not is_within_waking_hours(now, user.wake_time, user.sleep_time):
+                return
             taken = await get_doses_taken_today(session, course_id, today)
 
             # User already confirmed this dose (or later ones) — no nudge needed
@@ -386,6 +401,11 @@ async def schedule_next_dose(user_id: int) -> None:
         if taken >= phase_info.target_tablets:
             return  # All doses taken for today
 
+        if not is_within_waking_hours(now, user.wake_time, user.sleep_time):
+            return
+
+        sleep_dt = get_sleep_datetime(now, user.wake_time, user.sleep_time)
+
         # Determine next dose time from last actual intake
         last_time = await get_last_dose_time(session, course.id, day)
 
@@ -396,6 +416,9 @@ async def schedule_next_dose(user_id: int) -> None:
             )
         else:
             next_dt = now  # First dose of the day — send immediately
+
+        if next_dt >= sleep_dt:
+            return
 
         dose_number = taken + 1
 
@@ -415,24 +438,26 @@ async def schedule_next_dose(user_id: int) -> None:
         # Follow-up nudge
         reminder_dt = max(next_dt, now)
         followup_dt = reminder_dt + datetime.timedelta(minutes=FOLLOWUP_DELAY_MINUTES)
-        await send_dose_followup.schedule_by_time(
-            schedule_source,
-            followup_dt,
-            user_id,
-            course.id,
-            day,
-            phase_info.phase,
-            dose_number,
-        )
+        if followup_dt < sleep_dt:
+            await send_dose_followup.schedule_by_time(
+                schedule_source,
+                followup_dt,
+                user_id,
+                course.id,
+                day,
+                phase_info.phase,
+                dose_number,
+            )
 
         # Timeout: advance chain if dose not confirmed within one interval
         timeout_dt = reminder_dt + datetime.timedelta(minutes=phase_info.interval_minutes)
-        await handle_dose_timeout.schedule_by_time(
-            schedule_source,
-            timeout_dt,
-            user_id,
-            dose_number,
-        )
+        if timeout_dt < sleep_dt:
+            await handle_dose_timeout.schedule_by_time(
+                schedule_source,
+                timeout_dt,
+                user_id,
+                dose_number,
+            )
 
 
 @broker.task

@@ -40,6 +40,7 @@ from bot.services.schedule import (
     get_course_day,
     get_phase,
     get_progress,
+    get_sleep_datetime,
 )
 from bot.tasks import schedule_next_dose
 from bot.utils.texts import (
@@ -373,22 +374,6 @@ async def on_take_dose(
             await callback.answer("Курс завершён", show_alert=True)
             return
 
-        now_time = now.time()
-        if user.sleep_time > user.wake_time:
-            if now_time < user.wake_time or now_time >= user.sleep_time:
-                await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно",
-                    show_alert=True,
-                )
-                return
-        else:
-            if user.sleep_time <= now_time < user.wake_time:
-                await callback.answer(
-                    "Сейчас время сна — таблетку принимать не нужно",
-                    show_alert=True,
-                )
-                return
-
         phase_info = get_phase(day)
         taken = await get_doses_taken_today(session, course.id, today)
         if taken >= phase_info.target_tablets:
@@ -427,9 +412,7 @@ async def on_take_dose(
         await session.commit()
 
     next_dt = now + datetime.timedelta(minutes=phase_info.interval_minutes)
-    sleep_dt = datetime.datetime.combine(today, user.sleep_time, tzinfo=tz)
-    if sleep_dt <= datetime.datetime.combine(today, user.wake_time, tzinfo=tz):
-        sleep_dt += datetime.timedelta(days=1)
+    sleep_dt = get_sleep_datetime(now, user.wake_time, user.sleep_time)
     next_time = next_dt.strftime("%H:%M") if next_dt < sleep_dt else None
 
     text = dose_taken_text(taken, phase_info.target_display, next_time)

@@ -64,6 +64,36 @@ def get_course_day(start_date: datetime.date, current_date: datetime.date) -> in
     return (current_date - start_date).days + 1
 
 
+def is_within_waking_hours(
+    current: datetime.datetime | datetime.time,
+    wake_time: datetime.time,
+    sleep_time: datetime.time,
+) -> bool:
+    """Return True when ``current`` falls inside the user's waking window."""
+    if isinstance(current, datetime.datetime):
+        current_time = current.timetz().replace(tzinfo=None)
+    else:
+        current_time = current.replace(tzinfo=None)
+
+    if sleep_time > wake_time:
+        return wake_time <= current_time < sleep_time
+
+    return current_time >= wake_time or current_time < sleep_time
+
+
+def get_sleep_datetime(
+    reference_dt: datetime.datetime,
+    wake_time: datetime.time,
+    sleep_time: datetime.time,
+) -> datetime.datetime:
+    """Return the next sleep boundary for the waking window containing ``reference_dt``."""
+    sleep_dt = datetime.datetime.combine(reference_dt.date(), sleep_time, tzinfo=reference_dt.tzinfo)
+    wake_dt = datetime.datetime.combine(reference_dt.date(), wake_time, tzinfo=reference_dt.tzinfo)
+    if sleep_dt <= wake_dt:
+        sleep_dt += datetime.timedelta(days=1)
+    return sleep_dt
+
+
 def is_quit_day(day: int) -> bool:
     """Day 5: user MUST stop smoking completely."""
     return day >= QUIT_DAY

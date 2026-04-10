@@ -338,7 +338,9 @@ class TestCalculateDoseTimes:
         assert slots[0].time.minute == 0
         assert len(slots) == 6
 
-    def test_first_dose_at_late_evening_all_doses(self, course_start_date: datetime.date, timezone: str) -> None:
+    def test_first_dose_at_late_evening_all_doses(
+        self, course_start_date: datetime.date, timezone: str
+    ) -> None:
         """Course started very late — all target doses still scheduled past sleep."""
         from zoneinfo import ZoneInfo
 

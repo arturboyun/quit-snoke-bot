@@ -165,7 +165,7 @@ async def schedule_getter(dialog_manager: DialogManager, **kwargs) -> dict:
         return {"text": "Нет активного курса или курс завершён."}
 
     async with session_factory() as session:
-        taken_times = await get_today_dose_times(session, ctx["course"].id, ctx["today"])
+        taken_times = await get_today_dose_times(session, ctx["course"].id, ctx["day"])
 
     phase_info = get_phase(ctx["day"])
     now = datetime.datetime.now(ctx["tz"])
